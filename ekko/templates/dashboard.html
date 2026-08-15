@@ -151,6 +151,42 @@
   .find.warning .sev { background:color-mix(in srgb,var(--warning) 18%,transparent); color:var(--ink-1); }
   .find.good { border-left-color:var(--good); }
   .find.good .sev { background:color-mix(in srgb,var(--good) 14%,transparent); color:var(--up); }
+  .sat-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px; }
+  @media (max-width:800px){ .sat-grid{ grid-template-columns:1fr; } }
+  .sat-col h3 { font-size:.85rem; font-weight:600; margin-bottom:10px; color:var(--ink-2); }
+  .sat { border:1px solid var(--border); border-left:4px solid var(--good);
+    border-radius:10px; padding:10px 14px; margin-bottom:10px; font-size:.83rem; }
+  .sat.neg { border-left-color:var(--critical); }
+  .sat .st { font-weight:600; display:flex; justify-content:space-between; gap:8px; }
+  .sat .pct { color:var(--ink-3); font-size:.72rem; white-space:nowrap; }
+  .sat ul { margin:6px 0 0 16px; color:var(--ink-2); }
+  .sat li { margin-bottom:3px; }
+  .voice { border:1px solid var(--border); border-radius:10px; padding:12px 16px;
+    margin-top:14px; font-size:.85rem; }
+  .voice h4 { font-size:.82rem; margin:10px 0 4px; }
+  .voice h4:first-child { margin-top:0; }
+  .voice p { color:var(--ink-2); margin:0 0 6px; line-height:1.5; }
+  .reco { border:1px solid var(--border); border-radius:12px; padding:12px 16px;
+    margin-bottom:12px; font-size:.84rem; border-left:4px solid var(--warning); }
+  .reco.HIGH { border-left-color:var(--critical); }
+  .reco.LOW { border-left-color:var(--good); }
+  .reco .rt { font-weight:650; display:flex; align-items:center; gap:8px; }
+  .reco .rd { color:var(--ink-2); margin-top:4px; }
+  .reco .meta3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:10px;
+    background:var(--accent-wash); border-radius:8px; padding:8px 10px; font-size:.75rem; }
+  .reco .meta3 b { display:block; font-size:.65rem; color:var(--ink-3);
+    text-transform:uppercase; letter-spacing:.05em; }
+  .reco .task-btn { margin-top:10px; width:100%; background:none;
+    border:1px solid var(--border); color:var(--s1); border-radius:8px;
+    padding:8px; cursor:pointer; font-size:.8rem; }
+  .reco .task-btn:hover { background:var(--accent-wash); }
+  .rev-tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:.78rem;
+    color:var(--ink-2); }
+  .rev-tools select { background:var(--surface-1); color:var(--ink-1);
+    border:1px solid var(--border); border-radius:8px; padding:5px 8px; font-size:.78rem; }
+  .rev-tools label { display:inline-flex; gap:5px; align-items:center; cursor:pointer; }
+  .rev-tools .csv { background:none; border:1px solid var(--border); color:var(--s1);
+    border-radius:8px; padding:5px 10px; cursor:pointer; font-size:.78rem; }
   .sugg { border:1px solid var(--border); border-radius:10px; padding:10px 14px;
     margin-bottom:10px; font-size:.83rem; }
   .sugg .q { font-style:italic; }
@@ -272,9 +308,15 @@
   <div id="analysisWrap" class="hidden" aria-live="polite">
     <div class="sub" id="anSource" style="margin-top:6px"></div>
     <div class="find good hidden" id="anSummary" style="margin-top:10px"></div>
+    <div class="sat-grid" id="satWrap">
+      <div class="sat-col"><h3>👍 Satisfactions</h3><div id="satList"></div></div>
+      <div class="sat-col"><h3>👎 Dissatisfactions</h3><div id="dissatList"></div></div>
+    </div>
+    <div class="voice hidden" id="voiceWrap"><h3 style="font-size:.85rem;color:var(--ink-2);margin-bottom:8px">🗣 Voice of the Customer</h3><div id="voiceBody"></div></div>
     <div class="an-grid">
       <div class="an-col">
-        <h3>⚙ Analisi Ekko</h3>
+        <h3>💡 Recommendations</h3>
+        <div id="recoList"></div>
         <div id="findList"></div>
       </div>
       <div class="an-col">
@@ -289,7 +331,18 @@
 </div>
 
 <div class="card">
-  <div class="chead"><h2>Recensioni <span class="sub" id="revCount"></span></h2></div>
+  <div class="chead"><h2>Recensioni <span class="sub" id="revCount"></span></h2>
+    <div class="rev-tools">
+      <select id="revSort">
+        <option value="new">Più recenti</option>
+        <option value="old">Più vecchie</option>
+        <option value="worst">Peggiori prima</option>
+        <option value="best">Migliori prima</option>
+      </select>
+      <label><input type="checkbox" id="revHideEmpty"> nascondi senza testo</label>
+      <button class="csv" id="revCsv" type="button">⬇ CSV</button>
+    </div>
+  </div>
   <div id="revList"></div>
   <button class="more hidden" id="moreBtn" type="button">Mostra altre</button>
 </div>
@@ -311,7 +364,7 @@ const MS_DAY = 864e5;
 const NOW = new Date(DATA.generated_ts);
 
 /* ---------------- stato filtri ---------------- */
-const state = { period:"all", source:"all", sent:"all", topic:"all", search:"", shown:20 };
+const state = { period:"all", source:"all", sent:"all", topic:"all", search:"", shown:20, sort:"new", hideEmpty:false };
 
 function sentClass(f){ return f.sent > 0.2 ? "pos" : (f.sent < -0.2 ? "neg" : "neu"); }
 
@@ -605,7 +658,11 @@ function renderTopics(rows){
 function renderReviews(rows){
   const list=document.getElementById("revList"); list.replaceChildren();
   document.getElementById("revCount").textContent=`· ${fmt(rows.length)} nel filtro`;
-  const sorted=[...rows].sort((a,b)=>b.d.localeCompare(a.d));
+  let sorted=[...rows];
+  if(state.hideEmpty) sorted=sorted.filter(f=>f.txt&&f.txt.trim());
+  const SORTS={ new:(a,b)=>b.d.localeCompare(a.d), old:(a,b)=>a.d.localeCompare(b.d),
+    worst:(a,b)=>a.st-b.st||b.d.localeCompare(a.d), best:(a,b)=>b.st-a.st||b.d.localeCompare(a.d) };
+  sorted.sort(SORTS[state.sort]||SORTS.new);
   const shown=sorted.slice(0,state.shown);
   if(!shown.length){ list.innerHTML='<div class="empty">Nessuna recensione con questi filtri.</div>'; }
   shown.forEach(f=>{
@@ -779,7 +836,44 @@ function renderAnalysis(rows, ai){
   if(sm){ if(ai && ai.summary){ sm.textContent=ai.summary; sm.classList.remove("hidden"); }
     else sm.classList.add("hidden"); }
 
-  const fl=document.getElementById("findList"); fl.replaceChildren();
+  // --- sezioni stile Glanceable (solo con AI) ---
+  const satL=document.getElementById("satList"), disL=document.getElementById("dissatList");
+  const recoL=document.getElementById("recoList"), vWrap=document.getElementById("voiceWrap"),
+        vBody=document.getElementById("voiceBody"), satWrap=document.getElementById("satWrap");
+  [satL,disL,recoL,vBody].forEach(e=>e&&e.replaceChildren());
+  const mkSat=(o,neg)=>{ const d=document.createElement("div"); d.className="sat"+(neg?" neg":"");
+    const h=document.createElement("div"); h.className="st";
+    const tt=document.createElement("span"); tt.textContent=o.title||"";
+    const pc=document.createElement("span"); pc.className="pct"; pc.textContent=o.pct||"";
+    h.append(tt,pc); d.appendChild(h);
+    if(Array.isArray(o.points)&&o.points.length){ const ul=document.createElement("ul");
+      o.points.slice(0,4).forEach(p=>{const li=document.createElement("li");li.textContent=p;ul.appendChild(li);}); d.appendChild(ul);}
+    return d; };
+  if(ai && (ai.satisfactions?.length || ai.dissatisfactions?.length)){
+    satWrap.classList.remove("hidden");
+    (ai.satisfactions||[]).forEach(o=>satL.appendChild(mkSat(o,false)));
+    (ai.dissatisfactions||[]).forEach(o=>disL.appendChild(mkSat(o,true)));
+  } else { satWrap.classList.add("hidden"); }
+  if(ai && ai.voice?.length){ vWrap.classList.remove("hidden");
+    ai.voice.forEach(v=>{ const h=document.createElement("h4"); h.textContent=v.title||"";
+      const p=document.createElement("p"); p.textContent=v.text||""; vBody.append(h,p); });
+  } else { vWrap.classList.add("hidden"); }
+  if(ai && ai.recommendations?.length){
+    ai.recommendations.forEach(r=>{ const d=document.createElement("div");
+      d.className="reco "+(r.priority||"MEDIUM");
+      const t=document.createElement("div"); t.className="rt";
+      const b=document.createElement("span"); b.className="sev"; b.textContent=r.priority||"MEDIUM";
+      t.append(b, document.createTextNode(r.title||"")); d.appendChild(t);
+      if(r.detail){const dd=document.createElement("div");dd.className="rd";dd.textContent=r.detail;d.appendChild(dd);}
+      const m=document.createElement("div"); m.className="meta3";
+      const cell=(lbl,val)=>{const c=document.createElement("div");const bb=document.createElement("b");bb.textContent=lbl;c.appendChild(bb);c.appendChild(document.createTextNode(val||"—"));return c;};
+      m.append(cell("Owner",r.owner),cell("Timeline",r.timeline),cell("Target",r.target)); d.appendChild(m);
+      const tb=document.createElement("button"); tb.className="task-btn"; tb.type="button";
+      tb.textContent="✓ Crea task"; tb.addEventListener("click",()=>{tb.textContent="✓ Task creato";tb.disabled=true;});
+      d.appendChild(tb); recoL.appendChild(d); });
+  }
+
+    const fl=document.getElementById("findList"); fl.replaceChildren();
   const findings=(ai && ai.findings && ai.findings.length)
     ? ai.findings : computeFindings(rows);
   if(!findings.length){
@@ -876,6 +970,16 @@ function syncControls(){
     document.getElementById("fSearch").value=""; renderAll(); });
   document.getElementById("moreBtn").addEventListener("click",()=>{
     state.shown+=30; renderAll(); });
+  document.getElementById("revSort").addEventListener("change",e=>{state.sort=e.target.value;renderAll();});
+  document.getElementById("revHideEmpty").addEventListener("change",e=>{state.hideEmpty=e.target.checked;renderAll();});
+  document.getElementById("revCsv").addEventListener("click",()=>{
+    const rows=filtered(); const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+    const head=["data","fonte","stelle","risposta","temi","testo"];
+    const lines=[head.join(",")].concat(rows.map(f=>[f.d.slice(0,10),f.s,f.st,f.rep?"si":"no",
+      (f.topics||[]).join("|"),f.txt||""].map(esc).join(",")));
+    const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+    a.download=(DATA.business_name||"ekko")+"_recensioni.csv"; a.click(); });
   document.querySelectorAll(".tgl").forEach(btn=>{
     btn.addEventListener("click",()=>{
       const tv=document.getElementById(btn.dataset.tv);

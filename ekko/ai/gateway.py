@@ -29,21 +29,31 @@ DEFAULT_MODELS = {
 SYSTEM_PROMPT = """Sei il motore di analisi di Ekko, piattaforma di reputation intelligence.
 Ricevi recensioni filtrate di un'azienda. Rispondi SOLO con JSON valido, schema:
 {
- "findings": [
-   {"sev": "critical|serious|warning|good",
-    "title": "titolo breve e concreto",
-    "detail": "evidenza con numeri presi dai dati",
-    "action": "azione operativa consigliata"}
+ "summary": "2-3 frasi di sintesi esecutiva",
+ "satisfactions": [
+   {"title": "tema di soddisfazione", "pct": "43.8% of reviews",
+    "points": ["evidenza 1", "evidenza 2"]}
+ ],
+ "dissatisfactions": [
+   {"title": "tema di insoddisfazione", "pct": "12% of reviews",
+    "points": ["evidenza 1", "evidenza 2"]}
+ ],
+ "voice": [
+   {"title": "titoletto sezione", "text": "paragrafo discorsivo stile Voice of the Customer"}
+ ],
+ "recommendations": [
+   {"priority": "HIGH|MEDIUM|LOW", "title": "azione", "detail": "perché e come",
+    "owner": "reparto suggerito", "timeline": "es. pilota in 30 giorni",
+    "target": "obiettivo misurabile"}
  ],
  "suggestions": [
-   {"q": "suggerimento espresso dall'utente, citato o parafrasato fedelmente",
-    "label": "fonte · data · stelle"}
- ],
- "summary": "2-3 frasi di sintesi esecutiva in italiano"
+   {"q": "suggerimento espresso dall'utente, citato fedelmente", "label": "fonte · data · stelle"}
+ ]
 }
-Massimo 5 findings ordinati per severità, massimo 8 suggestions.
-I suggestions sono SOLO richieste/proposte espresse dagli utenti nelle recensioni,
-non tue idee. Se non ce ne sono, lista vuota. Tono: diretto, operativo, italiano."""
+Massimo 4 satisfactions, 4 dissatisfactions, 3 sezioni voice, 4 recommendations
+(ordinate per priorità), 8 suggestions. Le percentuali stimale dai dati ricevuti.
+I suggestions sono SOLO richieste/proposte espresse dagli utenti nelle recensioni.
+Tono: diretto, operativo, italiano."""
 
 
 class AIGateway:
@@ -97,7 +107,7 @@ class AIGateway:
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": os.environ["ANTHROPIC_API_KEY"],
                          "anthropic-version": "2023-06-01"},
-                json={"model": self.model, "max_tokens": 1800,
+                json={"model": self.model, "max_tokens": 3000,
                       "system": SYSTEM_PROMPT,
                       "messages": [{"role": "user", "content": user_prompt}]},
                 timeout=60)
@@ -107,7 +117,7 @@ class AIGateway:
             resp = httpx.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-                json={"model": self.model, "max_tokens": 1800, "temperature": 0.2,
+                json={"model": self.model, "max_tokens": 3000, "temperature": 0.2,
                       "response_format": {"type": "json_object"},
                       "messages": [{"role": "system", "content": SYSTEM_PROMPT},
                                    {"role": "user", "content": user_prompt}]},
@@ -122,7 +132,7 @@ class AIGateway:
                 json={"systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
                       "contents": [{"parts": [{"text": user_prompt}]}],
                       "generationConfig": {"temperature": 0.2,
-                                           "maxOutputTokens": 1800,
+                                           "maxOutputTokens": 3000,
                                            "responseMimeType": "application/json"}},
                 timeout=60)
             resp.raise_for_status()
@@ -137,11 +147,19 @@ class AIGateway:
         if start == -1 or end == -1:
             raise ValueError("Risposta AI senza JSON")
         data = json.loads(raw[start:end + 1])
-        data.setdefault("findings", [])
-        data.setdefault("suggestions", [])
+        for k in ("findings", "suggestions", "satisfactions",
+                  "dissatisfactions", "voice", "recommendations"):
+            data.setdefault(k, [])
         allowed = {"critical", "serious", "warning", "good"}
         data["findings"] = [f for f in data["findings"]
                             if isinstance(f, dict) and f.get("sev") in allowed][:5]
         data["suggestions"] = [s for s in data["suggestions"]
                                if isinstance(s, dict) and s.get("q")][:8]
+        PRIO_MAP = {"high": "HIGH", "alta": "HIGH", "alto": "HIGH",
+                    "medium": "MEDIUM", "media": "MEDIUM", "medio": "MEDIUM",
+                    "low": "LOW", "bassa": "LOW", "basso": "LOW"}
+        data["recommendations"] = [r for r in data["recommendations"]
+                                   if isinstance(r, dict) and r.get("title")][:4]
+        for r in data["recommendations"]:
+            r["priority"] = PRIO_MAP.get(str(r.get("priority", "")).strip().lower(), "MEDIUM")
         return data
