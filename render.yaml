@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: ekko
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt && python scripts/gen_demo_data.py"
+    startCommand: "gunicorn ekko.api.main:app --bind 0.0.0.0:$PORT --timeout 300 --workers 1"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.4"
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: EKKO_AI_PROVIDER
+        value: gemini
+      - key: EKKO_AI_MODEL
+        value: gemini-flash-latest
+      - key: DATAFORSEO_AUTH
+        sync: false
+      - key: EKKO_DATAFORSEO_TIMEOUT
+        value: "240"
+      - key: EKKO_ENABLE_PUBLIC_TRUSTPILOT
+        value: "1"
+      - key: EKKO_AUTHOR_HMAC_KEY
+        sync: false

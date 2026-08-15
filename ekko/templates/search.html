@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ekko — Cerca un'azienda</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    background:light-dark(#f9f9f7,#0d0d0d); color:light-dark(#0b0b0b,#fff);
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; padding:24px; }
+  .logo { font-size:2.6rem; font-weight:700; letter-spacing:-.02em; }
+  .logo span { color:#2a78d6; }
+  .tag { color:light-dark(#52514e,#c3c2b7); margin:6px 0 34px; font-size:.95rem; }
+  form { width:100%; max-width:620px; }
+  .box { background:light-dark(#fcfcfb,#1a1a19);
+    border:1px solid light-dark(rgba(11,11,11,.12),rgba(255,255,255,.12));
+    border-radius:16px; padding:10px 12px; box-shadow:0 4px 24px rgba(0,0,0,.06);
+    display:flex; flex-direction:column; gap:8px; }
+  .main-in { display:flex; gap:10px; align-items:center; }
+  .main-in input { flex:1; border:none; outline:none; background:none;
+    font-size:1.05rem; color:inherit; padding:10px 6px; }
+  .go { background:#2a78d6; color:#fff; border:none; border-radius:10px;
+    padding:11px 22px; font-size:.95rem; font-weight:600; cursor:pointer; }
+  .go:disabled { opacity:.6; }
+  .extra { display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid
+    light-dark(#e1e0d9,#2c2c2a); padding-top:8px; }
+  .extra input { flex:1; min-width:140px; border:1px solid
+    light-dark(rgba(11,11,11,.10),rgba(255,255,255,.12)); border-radius:8px;
+    background:none; color:inherit; padding:8px 10px; font-size:.83rem; }
+  .hint { color:light-dark(#898781,#898781); font-size:.75rem; margin-top:14px;
+    text-align:center; max-width:620px; line-height:1.5; }
+  .src { display:inline-flex; align-items:center; gap:5px; margin:0 6px; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .on { background:#0ca30c; } .off { background:#c3c2b7; }
+  .recent { margin-top:34px; max-width:620px; width:100%; }
+  .recent h2 { font-size:.8rem; color:light-dark(#898781,#898781);
+    font-weight:600; margin-bottom:8px; }
+  .recent a { display:flex; justify-content:space-between; padding:10px 14px;
+    background:light-dark(#fcfcfb,#1a1a19); border:1px solid
+    light-dark(rgba(11,11,11,.08),rgba(255,255,255,.10)); border-radius:10px;
+    margin-bottom:6px; color:inherit; text-decoration:none; font-size:.9rem; }
+  .recent a:hover { border-color:#2a78d6; }
+  .recent .n { color:light-dark(#898781,#898781); font-size:.8rem; }
+  .working { display:none; margin-top:16px; color:light-dark(#52514e,#c3c2b7);
+    font-size:.88rem; text-align:center; }
+  .working .sp { width:14px; height:14px; border:2px solid #2a78d655;
+    border-top-color:#2a78d6; border-radius:50%; display:inline-block;
+    vertical-align:-2px; margin-right:8px; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="logo">ekko<span>.</span></div>
+  <div class="tag">Che reputazione ha questa azienda? Scrivilo. Ekko fa il resto.</div>
+
+  <form method="post" action="/search" id="f">
+    <div class="box">
+      <div class="main-in">
+        <input name="name" id="name" placeholder="Nome azienda — es. Ristorante Da Mario"
+               autofocus required autocomplete="off">
+        <button class="go" id="go" type="submit">Analizza</button>
+      </div>
+      <div class="extra">
+        <input name="city" placeholder="Città (aiuta Google) — es. Milano">
+        <input name="domain" placeholder="Dominio (per Trustpilot) — es. azienda.it">
+      </div>
+    </div>
+  </form>
+  <div class="working" id="working"><span class="sp"></span>
+    Raccolta recensioni in corso… (Google{{ " + Trustpilot" if tp_on else "" }};
+    la raccolta completa può richiedere 2-4 minuti)</div>
+
+  <div class="hint">
+    Fonti attive:
+    <span class="src"><span class="dot {{ 'on' if google_on else 'off' }}"></span>Google</span>
+    <span class="src"><span class="dot {{ 'on' if tp_on else 'off' }}"></span>Trustpilot API</span>
+    <span class="src"><span class="dot {{ 'on' if tp_public_on else 'off' }}"></span>Trustpilot pubblico</span>
+    <span class="src"><span class="dot {{ 'on' if ai_on else 'off' }}"></span>Analisi AI{{ ai_label }}</span>
+    <br>Le fonti spente si attivano con le chiavi in <code>.env</code> — senza chiavi si usano i dati demo.
+  </div>
+
+  {% if recent %}
+  <div class="recent">
+    <h2>ANALISI RECENTI</h2>
+    {% for b in recent %}
+      <a href="/businesses/{{ b.id }}/dashboard">
+        <span>{{ b.name }}</span><span class="n">{{ b.count }} recensioni →</span>
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+<script>
+document.getElementById("f").addEventListener("submit",()=>{
+  document.getElementById("go").disabled=true;
+  document.getElementById("working").style.display="block";
+});
+</script>
+</body>
+</html>

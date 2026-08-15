@@ -1,0 +1,15 @@
+ekko.db
+test_ekko.db
+report_demo.html
+__pycache__/
+*.egg-info/
+.env
+.ekko_tp_token.json
+.env*
+*.t
+_envbak_*
+*.bak
+ekko_deploy*.zip
+ekko_skeleton.zip
+dashboard_demo.html
+search_page_demo.html

@@ -1,0 +1,407 @@
+[
+  {
+    "id": "t0000",
+    "author": "user_t_0",
+    "stars": 4,
+    "text": "Personale gentile e disponibile, esperienza ottima.",
+    "lang": "it",
+    "published_at": "2025-09-26T12:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0001",
+    "author": "user_t_1",
+    "stars": 3,
+    "text": "Staff gentile, però la prenotazione online non funzionava.",
+    "lang": "it",
+    "published_at": "2026-02-07T02:00:00+00:00",
+    "reply": "Grazie della segnalazione, stiamo migliorando proprio su questo punto."
+  },
+  {
+    "id": "t0002",
+    "author": "user_t_2",
+    "stars": 5,
+    "text": "Personale gentile e disponibile, esperienza ottima.",
+    "lang": "it",
+    "published_at": "2025-06-05T13:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0003",
+    "author": "user_t_3",
+    "stars": 5,
+    "text": "Assistenza rapida, hanno risolto il reso in un giorno.",
+    "lang": "it",
+    "published_at": "2025-04-18T09:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0004",
+    "author": "user_t_4",
+    "stars": 3,
+    "text": "Staff gentile, però la prenotazione online non funzionava. Perché non introdurre una tessera fedeltà per i clienti abituali?",
+    "lang": "it",
+    "published_at": "2026-03-18T19:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0005",
+    "author": "user_t_5",
+    "stars": 4,
+    "text": "Prenotazione facilissima e nessuna attesa.",
+    "lang": "it",
+    "published_at": "2025-05-06T06:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0006",
+    "author": "user_t_6",
+    "stars": 3,
+    "text": "Staff gentile, però la prenotazione online non funzionava.",
+    "lang": "it",
+    "published_at": "2025-11-20T10:00:00+00:00",
+    "reply": "Ci scusiamo per il disagio: la contattiamo in privato per risolvere."
+  },
+  {
+    "id": "t0007",
+    "author": "user_t_7",
+    "stars": 5,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile.",
+    "lang": "it",
+    "published_at": "2026-03-05T18:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0008",
+    "author": "user_t_8",
+    "stars": 4,
+    "text": "Personale gentile e disponibile, esperienza ottima.",
+    "lang": "it",
+    "published_at": "2025-03-23T07:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0009",
+    "author": "user_t_9",
+    "stars": 3,
+    "text": "Staff gentile, però la prenotazione online non funzionava.",
+    "lang": "it",
+    "published_at": "2025-10-06T17:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0010",
+    "author": "user_t_10",
+    "stars": 4,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile.",
+    "lang": "it",
+    "published_at": "2026-06-25T15:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0011",
+    "author": "user_t_11",
+    "stars": 5,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile.",
+    "lang": "it",
+    "published_at": "2025-10-06T13:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0012",
+    "author": "user_t_12",
+    "stars": 3,
+    "text": "Buon prodotto ma spedizione lenta. Manca un parcheggio: potreste convenzionarvi con il garage vicino.",
+    "lang": "it",
+    "published_at": "2026-02-04T21:00:00+00:00",
+    "reply": "Grazie della segnalazione, stiamo migliorando proprio su questo punto."
+  },
+  {
+    "id": "t0013",
+    "author": "user_t_13",
+    "stars": 3,
+    "text": "Staff gentile, però la prenotazione online non funzionava.",
+    "lang": "it",
+    "published_at": "2025-11-06T01:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0014",
+    "author": "user_t_14",
+    "stars": 4,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile. Manca un parcheggio: potreste convenzionarvi con il garage vicino.",
+    "lang": "it",
+    "published_at": "2025-05-01T15:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0015",
+    "author": "user_t_15",
+    "stars": 4,
+    "text": "Assistenza rapida, hanno risolto il reso in un giorno.",
+    "lang": "it",
+    "published_at": "2024-11-30T07:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0016",
+    "author": "user_t_16",
+    "stars": 5,
+    "text": "Rapporto qualità prezzo davvero conveniente.",
+    "lang": "it",
+    "published_at": "2025-03-30T06:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0017",
+    "author": "user_t_17",
+    "stars": 4,
+    "text": "Rapporto qualità prezzo davvero conveniente.",
+    "lang": "it",
+    "published_at": "2026-02-04T09:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0018",
+    "author": "user_t_18",
+    "stars": 5,
+    "text": "Personale gentile e disponibile, esperienza ottima.",
+    "lang": "it",
+    "published_at": "2025-08-01T20:00:00+00:00",
+    "reply": "Ci scusiamo per il disagio: la contattiamo in privato per risolvere."
+  },
+  {
+    "id": "t0019",
+    "author": "user_t_19",
+    "stars": 5,
+    "text": "Rapporto qualità prezzo davvero conveniente.",
+    "lang": "it",
+    "published_at": "2025-09-11T05:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0020",
+    "author": "user_t_20",
+    "stars": 4,
+    "text": "Locale pulito e curato, staff cordiale.",
+    "lang": "it",
+    "published_at": "2025-09-20T11:00:00+00:00",
+    "reply": "Grazie per il feedback! Ci fa molto piacere."
+  },
+  {
+    "id": "t0021",
+    "author": "user_t_21",
+    "stars": 3,
+    "text": "Nella media, prezzo ok ma attesa migliorabile. Dovreste aggiungere personale nel weekend per ridurre l'attesa.",
+    "lang": "it",
+    "published_at": "2025-09-02T16:00:00+00:00",
+    "reply": "Ci scusiamo per il disagio: la contattiamo in privato per risolvere."
+  },
+  {
+    "id": "t0022",
+    "author": "user_t_22",
+    "stars": 4,
+    "text": "Ottimo prodotto, qualità eccellente. Consigliato!",
+    "lang": "it",
+    "published_at": "2025-11-20T05:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0023",
+    "author": "user_t_23",
+    "stars": 3,
+    "text": "Buon prodotto ma spedizione lenta.",
+    "lang": "it",
+    "published_at": "2025-04-10T22:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0024",
+    "author": "user_t_24",
+    "stars": 4,
+    "text": "Assistenza rapida, hanno risolto il reso in un giorno.",
+    "lang": "it",
+    "published_at": "2025-08-15T18:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0025",
+    "author": "user_t_25",
+    "stars": 5,
+    "text": "Locale pulito e curato, staff cordiale.",
+    "lang": "it",
+    "published_at": "2026-03-23T23:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0026",
+    "author": "user_t_26",
+    "stars": 5,
+    "text": "Assistenza rapida, hanno risolto il reso in un giorno.",
+    "lang": "it",
+    "published_at": "2026-01-22T21:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0027",
+    "author": "user_t_27",
+    "stars": 4,
+    "text": "Rapporto qualità prezzo davvero conveniente.",
+    "lang": "it",
+    "published_at": "2025-10-13T10:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0028",
+    "author": "user_t_28",
+    "stars": 1,
+    "text": "Locale sporco, igiene da rivedere.",
+    "lang": "it",
+    "published_at": "2026-06-13T17:00:00+00:00",
+    "reply": "Grazie per il feedback! Ci fa molto piacere."
+  },
+  {
+    "id": "t0029",
+    "author": "user_t_29",
+    "stars": 5,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile.",
+    "lang": "it",
+    "published_at": "2025-06-17T19:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0030",
+    "author": "user_t_30",
+    "stars": 2,
+    "text": "Consegna in ritardo di una settimana, corriere irreperibile.",
+    "lang": "it",
+    "published_at": "2025-08-28T09:00:00+00:00",
+    "reply": "Grazie per il feedback! Ci fa molto piacere."
+  },
+  {
+    "id": "t0031",
+    "author": "user_t_31",
+    "stars": 5,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile.",
+    "lang": "it",
+    "published_at": "2025-04-11T14:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0032",
+    "author": "user_t_32",
+    "stars": 5,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile.",
+    "lang": "it",
+    "published_at": "2025-06-19T23:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0033",
+    "author": "user_t_33",
+    "stars": 1,
+    "text": "Assistenza inesistente: nessuna risposta alla richiesta di rimborso.",
+    "lang": "it",
+    "published_at": "2025-12-09T08:00:00+00:00",
+    "reply": "Grazie per il feedback! Ci fa molto piacere."
+  },
+  {
+    "id": "t0034",
+    "author": "user_t_34",
+    "stars": 3,
+    "text": "Buon prodotto ma spedizione lenta.",
+    "lang": "it",
+    "published_at": "2026-03-02T13:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0035",
+    "author": "user_t_35",
+    "stars": 5,
+    "text": "Rapporto qualità prezzo davvero conveniente.",
+    "lang": "it",
+    "published_at": "2026-02-23T07:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0036",
+    "author": "user_t_36",
+    "stars": 4,
+    "text": "Assistenza rapida, hanno risolto il reso in un giorno.",
+    "lang": "it",
+    "published_at": "2026-06-10T04:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0037",
+    "author": "user_t_37",
+    "stars": 4,
+    "text": "Rapporto qualità prezzo davvero conveniente.",
+    "lang": "it",
+    "published_at": "2025-10-07T22:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0038",
+    "author": "user_t_38",
+    "stars": 5,
+    "text": "Rapporto qualità prezzo davvero conveniente.",
+    "lang": "it",
+    "published_at": "2026-03-18T02:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0039",
+    "author": "user_t_39",
+    "stars": 4,
+    "text": "Locale pulito e curato, staff cordiale.",
+    "lang": "it",
+    "published_at": "2026-02-07T07:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0040",
+    "author": "user_t_40",
+    "stars": 3,
+    "text": "Buon prodotto ma spedizione lenta.",
+    "lang": "it",
+    "published_at": "2025-04-06T16:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0041",
+    "author": "user_t_41",
+    "stars": 5,
+    "text": "Prenotazione facilissima e nessuna attesa.",
+    "lang": "it",
+    "published_at": "2026-01-30T00:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0042",
+    "author": "user_t_42",
+    "stars": 5,
+    "text": "Consegna puntuale e pacco perfetto, corriere impeccabile.",
+    "lang": "it",
+    "published_at": "2025-11-04T20:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0043",
+    "author": "user_t_43",
+    "stars": 1,
+    "text": "Personale scortese al telefono, esperienza pessima.",
+    "lang": "it",
+    "published_at": "2025-12-19T14:00:00+00:00",
+    "reply": null
+  },
+  {
+    "id": "t0044",
+    "author": "user_t_44",
+    "stars": 3,
+    "text": "Staff gentile, però la prenotazione online non funzionava.",
+    "lang": "it",
+    "published_at": "2025-12-06T14:00:00+00:00",
+    "reply": null
+  }
+]

@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ekko Dashboard — {{ business_name }}</title>
+{% if pending %}<meta http-equiv="refresh" content="12">{% endif %}
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:#fcfcfb; --page:#f9f9f7;
+    --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+    --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+    --s1:#2a78d6; --s2:#eb6834;               /* categorical: google, trustpilot */
+    --pos:#2a78d6; --neu:#c3c2b7; --neg:#e34948;   /* diverging blue↔red, neutral gray */
+    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+    --up:#006300;
+    --accent-wash:rgba(42,120,214,.10);
+  }
+  :root[data-theme="dark"] .viz-root { color-scheme: dark;
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+    --s1:#3987e5; --s2:#d95926;
+    --pos:#3987e5; --neu:#57565196; --neu:#575651; --neg:#e66767;
+    --up:#0ca30c; --accent-wash:rgba(57,135,229,.14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root { color-scheme: dark;
+      --surface-1:#1a1a19; --page:#0d0d0d;
+      --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+      --s1:#3987e5; --s2:#d95926;
+      --pos:#3987e5; --neu:#575651; --neg:#e66767;
+      --up:#0ca30c; --accent-wash:rgba(57,135,229,.14);
+    }
+  }
+  * { box-sizing:border-box; margin:0; }
+  body.viz-root { font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    background:var(--page); color:var(--ink-1); padding:24px;
+    max-width:1160px; margin:0 auto; font-size:14px; }
+  h1 { font-size:1.25rem; font-weight:650; }
+  .sub { color:var(--ink-2); font-size:.8rem; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { background:var(--surface-1); border:1px solid var(--border);
+    border-radius:14px; padding:18px 20px; }
+  /* ---------- header ---------- */
+  header.row { align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .theme-btn { background:none; border:1px solid var(--border); border-radius:8px;
+    color:var(--ink-2); padding:6px 12px; cursor:pointer; font-size:.8rem; }
+  /* ---------- score hero ---------- */
+  .hero { display:flex; gap:28px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+  .hero .num { font-size:56px; font-weight:650; line-height:1; }
+  .hero .num small { font-size:18px; color:var(--ink-3); font-weight:400; }
+  .comp { min-width:150px; }
+  .comp .lbl { display:flex; justify-content:space-between; font-size:.75rem;
+    color:var(--ink-2); margin-bottom:3px; }
+  .track { height:6px; background:var(--grid); border-radius:3px; overflow:hidden; }
+  .track i { display:block; height:100%; background:var(--s1); border-radius:3px; }
+  /* ---------- filters ---------- */
+  .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    margin:0 0 16px; }
+  .filters label { font-size:.72rem; color:var(--ink-3); display:block; margin-bottom:3px; }
+  .filters select, .filters input[type=search] {
+    background:var(--surface-1); color:var(--ink-1); border:1px solid var(--border);
+    border-radius:8px; padding:7px 10px; font-size:.82rem; min-width:120px; }
+  .reset { align-self:flex-end; background:none; border:none; color:var(--s1);
+    cursor:pointer; font-size:.8rem; padding:8px 4px; }
+  /* ---------- KPI tiles ---------- */
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:12px; margin-bottom:16px; }
+  .tile .lbl { font-size:.75rem; color:var(--ink-2); }
+  .tile .val { font-size:26px; font-weight:600; margin-top:2px; }
+  .tile .note { font-size:.72rem; color:var(--ink-3); margin-top:2px; }
+  .tile .note.neg { color:var(--critical); }
+  .tile .note.pos { color:var(--up); }
+  /* ---------- chart cards ---------- */
+  .grid2 { display:grid; grid-template-columns:minmax(260px,1fr) minmax(340px,1.6fr);
+    gap:16px; margin-bottom:16px; }
+  @media (max-width:800px){ .grid2{ grid-template-columns:1fr; } }
+  .chead { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+  .chead h2 { font-size:.92rem; font-weight:600; }
+  .tgl { background:none; border:none; color:var(--ink-3); cursor:pointer; font-size:.72rem; }
+  .tgl:hover { color:var(--s1); }
+  .legend { display:flex; gap:14px; font-size:.75rem; color:var(--ink-2);
+    flex-wrap:wrap; margin-top:8px; }
+  .legend .key { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+  .legend .key.off { opacity:.4; }
+  .sw { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .lk { width:14px; height:2px; display:inline-block; border-radius:1px; }
+  svg text { font-family:inherit; }
+  table.tv { width:100%; border-collapse:collapse; font-size:.8rem;
+    font-variant-numeric:tabular-nums; }
+  .tv th,.tv td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--grid); }
+  .tv th { color:var(--ink-3); font-weight:600; font-size:.72rem; }
+  .tv td.n,.tv th.n { text-align:right; }
+  .hidden { display:none !important; }
+  /* ---------- topics ---------- */
+  .topic-row { display:grid; grid-template-columns:150px 1fr; gap:10px;
+    align-items:center; padding:4px 0; cursor:pointer; border-radius:8px; }
+  .topic-row:hover { background:var(--accent-wash); }
+  .topic-row.sel { background:var(--accent-wash); outline:1px solid var(--s1); }
+  .topic-row .tn { font-size:.8rem; color:var(--ink-1); text-align:right;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* ---------- reviews ---------- */
+  .rev { border-bottom:1px solid var(--grid); padding:12px 2px; font-size:.85rem; }
+  .rev:last-child { border-bottom:none; }
+  .rev .meta { color:var(--ink-3); font-size:.73rem; margin-top:4px;
+    display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .stars { color:#e8a413; letter-spacing:1px; font-size:.8rem; }
+  .chip { background:var(--accent-wash); color:var(--s1); border-radius:20px;
+    padding:1px 9px; font-size:.7rem; cursor:pointer; border:none; }
+  .badge { border-radius:20px; padding:1px 8px; font-size:.68rem; font-weight:600; }
+  .badge.rep { background:color-mix(in srgb, var(--good) 15%, transparent); color:var(--up); }
+  .badge.urg { background:color-mix(in srgb, var(--critical) 12%, transparent); color:var(--critical); }
+  .more { width:100%; margin-top:10px; background:none; border:1px dashed var(--baseline);
+    color:var(--ink-2); border-radius:10px; padding:9px; cursor:pointer; }
+  .empty { color:var(--ink-3); text-align:center; padding:24px; }
+  /* ---------- analisi & suggerimenti ---------- */
+  .an-head { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .btn-start { background:var(--s1); color:#fff; border:none; border-radius:10px;
+    padding:10px 20px; font-size:.88rem; font-weight:600; cursor:pointer;
+    display:inline-flex; align-items:center; gap:8px; }
+  .btn-start:disabled { opacity:.55; cursor:default; }
+  .btn-start .spin { width:12px; height:12px; border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff; border-radius:50%; display:inline-block;
+    animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .stale { background:color-mix(in srgb, var(--warning) 14%, transparent);
+    color:var(--ink-1); border-radius:10px; padding:8px 14px; font-size:.8rem;
+    margin-top:10px; display:flex; gap:10px; align-items:center; }
+  .stale button { background:none; border:none; color:var(--s1); cursor:pointer;
+    font-size:.8rem; font-weight:600; }
+  .an-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px; }
+  @media (max-width:800px){ .an-grid{ grid-template-columns:1fr; } }
+  .an-col h3 { font-size:.85rem; font-weight:600; margin-bottom:10px;
+    color:var(--ink-2); }
+  .find { border:1px solid var(--border); border-left-width:4px; border-radius:10px;
+    padding:10px 14px; margin-bottom:10px; font-size:.83rem; }
+  .find .ft { font-weight:600; display:flex; gap:8px; align-items:center; }
+  .find .fd { color:var(--ink-2); margin-top:3px; }
+  .find .fa { margin-top:6px; font-size:.78rem; }
+  .find .fa b { color:var(--ink-1); }
+  .sev { font-size:.66rem; font-weight:700; border-radius:20px; padding:1px 8px;
+    letter-spacing:.03em; }
+  .find.critical { border-left-color:var(--critical); }
+  .find.critical .sev { background:color-mix(in srgb,var(--critical) 14%,transparent); color:var(--critical); }
+  .find.serious { border-left-color:var(--serious); }
+  .find.serious .sev { background:color-mix(in srgb,var(--serious) 16%,transparent); color:var(--serious); }
+  .find.warning { border-left-color:var(--warning); }
+  .find.warning .sev { background:color-mix(in srgb,var(--warning) 18%,transparent); color:var(--ink-1); }
+  .find.good { border-left-color:var(--good); }
+  .find.good .sev { background:color-mix(in srgb,var(--good) 14%,transparent); color:var(--up); }
+  .sugg { border:1px solid var(--border); border-radius:10px; padding:10px 14px;
+    margin-bottom:10px; font-size:.83rem; }
+  .sugg .q { font-style:italic; }
+  .sugg .meta { color:var(--ink-3); font-size:.72rem; margin-top:5px;
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .an-note { color:var(--ink-3); font-size:.72rem; margin-top:12px; }
+  /* ---------- tooltip ---------- */
+  .collecting-bar { position:sticky; top:0; z-index:20; margin:-24px -24px 16px;
+    padding:12px 24px; background:var(--accent-wash);
+    border-bottom:1px solid var(--border); color:var(--ink-1); font-size:.9rem;
+    display:flex; align-items:center; gap:10px; }
+  .collecting-bar .sp { width:14px; height:14px; border:2px solid #2a78d655;
+    border-top-color:var(--s1); border-radius:50%; display:inline-block;
+    animation:spin .8s linear infinite; }
+  #tt { position:fixed; pointer-events:none; background:var(--surface-1);
+    border:1px solid var(--border); border-radius:10px; padding:8px 12px;
+    font-size:.78rem; box-shadow:0 4px 16px rgba(0,0,0,.12); z-index:10;
+    opacity:0; transition:opacity .08s; max-width:260px; }
+  #tt .v { font-weight:650; font-size:.88rem; }
+  #tt .l { color:var(--ink-2); }
+  .clickable { cursor:pointer; }
+</style>
+</head>
+<body class="viz-root">
+{% if pending %}<div class="collecting-bar"><span class="sp"></span>
+  Raccolta delle recensioni Google in corso… la pagina si aggiorna da sola ogni pochi secondi (di solito 2-4 minuti in tutto).</div>{% endif %}
+<header class="row">
+  <div>
+    <h1>{{ business_name }}</h1>
+    <div class="sub">Dashboard reputazionale · generata da Ekko · {{ generated_at }}
+      {% if total_reviews %}· <b>{{ total_reviews }}</b> recensioni totali su Google
+      ({{ analyzed_count }} analizzate){% endif %}</div>
+  </div>
+  <button class="theme-btn" id="themeBtn" type="button">◐ Tema</button>
+</header>
+
+<div class="card hero">
+  <div>
+    <div class="num" id="heroScore">{{ score.score }}<small>/100</small></div>
+    <div class="sub">Ekko Score · formula v{{ score.version }} · score complessivo (non filtrato)</div>
+  </div>
+  <div class="comp"><div class="lbl"><span>Qualità recensioni</span><span>{{ '%.0f' % score.base_component }}</span></div>
+    <div class="track"><i style="width:{{ score.base_component }}%"></i></div></div>
+  <div class="comp"><div class="lbl"><span>Trend 90 giorni</span><span>{{ '%.0f' % score.trend_component }}</span></div>
+    <div class="track"><i style="width:{{ score.trend_component }}%"></i></div></div>
+  <div class="comp"><div class="lbl"><span>Tasso di risposta</span><span>{{ '%.0f' % score.engagement_component }}</span></div>
+    <div class="track"><i style="width:{{ score.engagement_component }}%"></i></div></div>
+</div>
+
+<!-- Filtri: una riga, scopo su tutto ciò che segue -->
+<div class="card filters" id="filters">
+  <div><label for="fPeriod">Periodo</label>
+    <select id="fPeriod">
+      <option value="all" selected>Tutto lo storico</option>
+      <option value="365">Ultimi 12 mesi</option>
+      <option value="180">Ultimi 6 mesi</option>
+      <option value="90">Ultimi 90 giorni</option>
+      <option value="30">Ultimi 30 giorni</option>
+    </select></div>
+  <div><label for="fSource">Fonte</label>
+    <select id="fSource"><option value="all">Tutte le fonti</option></select></div>
+  <div><label for="fSent">Sentiment</label>
+    <select id="fSent">
+      <option value="all">Tutti</option>
+      <option value="pos">Positivo</option>
+      <option value="neu">Neutro</option>
+      <option value="neg">Negativo</option>
+    </select></div>
+  <div><label for="fTopic">Tema</label>
+    <select id="fTopic"><option value="all">Tutti i temi</option></select></div>
+  <div style="flex:1"><label for="fSearch">Cerca nel testo</label>
+    <input type="search" id="fSearch" placeholder="es. consegna, personale…"></div>
+  <button class="reset" id="fReset" type="button">✕ Azzera filtri</button>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="grid2">
+  <div class="card">
+    <div class="chead"><h2>Sentiment</h2>
+      <button class="tgl" data-tv="tvDonut" type="button">⊞ tabella</button></div>
+    <div id="donutWrap"></div>
+    <div class="legend" id="donutLegend"></div>
+    <table class="tv hidden" id="tvDonut"></table>
+  </div>
+  <div class="card">
+    <div class="chead"><h2>Andamento rating medio mensile</h2>
+      <button class="tgl" data-tv="tvTrend" type="button">⊞ tabella</button></div>
+    <div id="trendWrap"></div>
+    <table class="tv hidden" id="tvTrend"></table>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="chead">
+    <h2>Temi: menzioni negative ← → positive</h2>
+    <button class="tgl" data-tv="tvTopics" type="button">⊞ tabella</button>
+  </div>
+  <div class="sub" style="margin-bottom:10px">Clicca un tema per filtrare tutta la dashboard.
+    Le menzioni neutre sono nella tabella e nel tooltip.</div>
+  <div id="topicsWrap"></div>
+  <div class="legend">
+    <span class="key"><span class="sw" style="background:var(--neg)"></span>Negative</span>
+    <span class="key"><span class="sw" style="background:var(--pos)"></span>Positive</span>
+  </div>
+  <table class="tv hidden" id="tvTopics"></table>
+</div>
+
+<div class="card" style="margin-bottom:16px" id="analysisCard">
+  <div class="an-head">
+    <h2 style="font-size:.95rem">Analisi &amp; suggerimenti</h2>
+    <span class="sub">imposta i filtri in alto, poi avvia l'analisi sull'insieme filtrato</span>
+    <button class="btn-start" id="btnAnalyze" type="button">▶ Avvia analisi</button>
+  </div>
+  <div id="staleNote" class="stale hidden">
+    <span>⚠ I filtri sono cambiati dopo l'ultima analisi: i risultati potrebbero non corrispondere.</span>
+    <button type="button" id="btnReanalyze">Riesegui</button>
+  </div>
+  <div id="analysisWrap" class="hidden" aria-live="polite">
+    <div class="sub" id="anSource" style="margin-top:6px"></div>
+    <div class="find good hidden" id="anSummary" style="margin-top:10px"></div>
+    <div class="an-grid">
+      <div class="an-col">
+        <h3>⚙ Analisi Ekko</h3>
+        <div id="findList"></div>
+      </div>
+      <div class="an-col">
+        <h3>💬 Suggerimenti diretti degli utenti</h3>
+        <div id="suggList"></div>
+      </div>
+    </div>
+    <div class="an-note">Motore di analisi deterministico (stadio 0, zero token).
+      Con l'AI Gateway configurato questa sezione viene generata dal modello
+      (stadio 3) su sintesi aggregate — stessa struttura, maggiore profondità.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><h2>Recensioni <span class="sub" id="revCount"></span></h2></div>
+  <div id="revList"></div>
+  <button class="more hidden" id="moreBtn" type="button">Mostra altre</button>
+</div>
+
+<div id="tt"></div>
+
+<script id="ekko-data" type="application/json">{{ data_json | safe }}</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("ekko-data").textContent);
+const SOURCE_LABELS = { google:"Google", trustpilot:"Trustpilot", meta:"Meta",
+  tripadvisor:"TripAdvisor", demo:"Demo", conversational:"Conversazioni" };
+const SOURCE_SLOT = {};   // fonte -> slot categorico fisso (mai riciclato sui filtri)
+[...new Set(DATA.feedback.map(f=>f.s))].sort().forEach((s,i)=>SOURCE_SLOT[s]=i%2?"--s2":"--s1");
+const TOPIC_LABELS = t => t.replace(/\./g," · ").replace(/_/g," ");
+const css = v => getComputedStyle(document.body).getPropertyValue(v).trim();
+const fmt = n => n.toLocaleString("it-IT");
+const MS_DAY = 864e5;
+const NOW = new Date(DATA.generated_ts);
+
+/* ---------------- stato filtri ---------------- */
+const state = { period:"all", source:"all", sent:"all", topic:"all", search:"", shown:20 };
+
+function sentClass(f){ return f.sent > 0.2 ? "pos" : (f.sent < -0.2 ? "neg" : "neu"); }
+
+function filtered(){
+  const cut = state.period==="all" ? null : NOW - state.period*MS_DAY;
+  const q = state.search.trim().toLowerCase();
+  return DATA.feedback.filter(f =>
+    (!cut || new Date(f.d) >= cut) &&
+    (state.source==="all" || f.s===state.source) &&
+    (state.sent==="all" || sentClass(f)===state.sent) &&
+    (state.topic==="all" || f.topics.includes(state.topic)) &&
+    (!q || (f.txt||"").toLowerCase().includes(q)));
+}
+
+/* ---------------- tooltip ---------------- */
+const tt = document.getElementById("tt");
+function ttShow(evt, rows){
+  tt.replaceChildren();
+  rows.forEach(([label, value, keyColor])=>{
+    const div = document.createElement("div");
+    if (keyColor){ const k=document.createElement("span");
+      k.className="lk"; k.style.background=keyColor; k.style.display="inline-block";
+      k.style.marginRight="6px"; k.style.verticalAlign="middle"; div.appendChild(k); }
+    const v = document.createElement("span"); v.className="v"; v.textContent=value;
+    const l = document.createElement("span"); l.className="l"; l.textContent=" "+label;
+    div.append(v,l); tt.appendChild(div);
+  });
+  tt.style.opacity=1; ttMove(evt);
+}
+function ttMove(evt){
+  const pad=14, r=tt.getBoundingClientRect();
+  let x=evt.clientX+pad, y=evt.clientY+pad;
+  if (x+r.width>innerWidth-8) x=evt.clientX-r.width-pad;
+  if (y+r.height>innerHeight-8) y=evt.clientY-r.height-pad;
+  tt.style.left=x+"px"; tt.style.top=y+"px";
+}
+function ttHide(){ tt.style.opacity=0; }
+
+/* ---------------- KPI ---------------- */
+function renderKpis(rows){
+  const el = document.getElementById("kpis"); el.replaceChildren();
+  const n = rows.length;
+  const avg = n ? rows.reduce((a,f)=>a+f.st,0)/n : 0;
+  const rep = n ? rows.filter(f=>f.rep).length/n : 0;
+  const crit = rows.filter(f=>f.st<=2 && !f.rep).length;
+  const tiles = [
+    ["Recensioni nel periodo", fmt(n), null, null],
+    ["Rating medio", n? avg.toFixed(2)+" / 5" : "—", null, null],
+    ["Tasso di risposta", n? Math.round(rep*100)+"%" : "—",
+      rep<0.3&&n? "sotto il target 60%":"", rep<0.3?"neg":"" ],
+    ["Critiche senza risposta", fmt(crit),
+      crit>0?"recensioni ≤2★ da gestire":"tutto gestito", crit>0?"neg":"pos"],
+  ];
+  tiles.forEach(([lbl,val,note,cls])=>{
+    const d=document.createElement("div"); d.className="card tile";
+    const l=document.createElement("div"); l.className="lbl"; l.textContent=lbl;
+    const v=document.createElement("div"); v.className="val"; v.textContent=val;
+    d.append(l,v);
+    if(note){ const nn=document.createElement("div");
+      nn.className="note "+(cls||""); nn.textContent=note; d.appendChild(nn); }
+    el.appendChild(d);
+  });
+}
+
+/* ---------------- donut sentiment ---------------- */
+const SENT_META = [
+  ["pos","Positivo","--pos"], ["neu","Neutro","--neu"], ["neg","Negativo","--neg"]];
+function renderDonut(rows){
+  const counts = { pos:0, neu:0, neg:0 };
+  rows.forEach(f=>counts[sentClass(f)]++);
+  const total = rows.length;
+  const wrap = document.getElementById("donutWrap"); wrap.replaceChildren();
+  const svgNS="http://www.w3.org/2000/svg";
+  const svg=document.createElementNS(svgNS,"svg");
+  const W=230,H=190,cx=W/2,cy=H/2,R=72,TH=26;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width","100%");
+  svg.setAttribute("role","img");
+  svg.setAttribute("aria-label","Distribuzione del sentiment delle recensioni");
+  let a0=-Math.PI/2;
+  SENT_META.forEach(([key,label,varName])=>{
+    const v=counts[key]; if(!total) return;
+    const frac=v/total, a1=a0+frac*2*Math.PI;
+    if (v>0){
+      const p=document.createElementNS(svgNS,"path");
+      const large=frac>0.5?1:0;
+      const x0=cx+R*Math.cos(a0), y0=cy+R*Math.sin(a0);
+      const x1=cx+R*Math.cos(a1), y1=cy+R*Math.sin(a1);
+      const r2=R-TH;
+      const x2=cx+r2*Math.cos(a1), y2=cy+r2*Math.sin(a1);
+      const x3=cx+r2*Math.cos(a0), y3=cy+r2*Math.sin(a0);
+      p.setAttribute("d",`M${x0} ${y0} A${R} ${R} 0 ${large} 1 ${x1} ${y1} L${x2} ${y2} A${r2} ${r2} 0 ${large} 0 ${x3} ${y3} Z`);
+      p.setAttribute("fill",css(varName));
+      p.setAttribute("stroke",css("--surface-1"));   /* 2px surface gap */
+      p.setAttribute("stroke-width","2");
+      p.classList.add("clickable");
+      if (state.sent!=="all" && state.sent!==key) p.setAttribute("opacity","0.35");
+      p.setAttribute("tabindex","0");
+      p.setAttribute("aria-label",`${label}: ${v} recensioni`);
+      const show=e=>ttShow(e,[[label+` · ${Math.round(frac*100)}%`, fmt(v), css(varName)]]);
+      p.addEventListener("pointermove",show);
+      p.addEventListener("focus",e=>ttShow({clientX:innerWidth/2,clientY:innerHeight/3},[[label,fmt(v),css(varName)]]));
+      p.addEventListener("pointerleave",ttHide); p.addEventListener("blur",ttHide);
+      p.addEventListener("click",()=>{ setFilter("sent", state.sent===key?"all":key); });
+      svg.appendChild(p);
+    }
+    a0=a1;
+  });
+  const t1=document.createElementNS(svgNS,"text");
+  t1.setAttribute("x",cx); t1.setAttribute("y",cy-2); t1.setAttribute("text-anchor","middle");
+  t1.setAttribute("font-size","24"); t1.setAttribute("font-weight","650");
+  t1.setAttribute("fill",css("--ink-1")); t1.textContent = total? fmt(total):"0";
+  const t2=document.createElementNS(svgNS,"text");
+  t2.setAttribute("x",cx); t2.setAttribute("y",cy+16); t2.setAttribute("text-anchor","middle");
+  t2.setAttribute("font-size","10"); t2.setAttribute("fill",css("--ink-3"));
+  t2.textContent="recensioni";
+  svg.append(t1,t2); wrap.appendChild(svg);
+
+  const leg=document.getElementById("donutLegend"); leg.replaceChildren();
+  SENT_META.forEach(([key,label,varName])=>{
+    const k=document.createElement("span");
+    k.className="key"+(state.sent!=="all"&&state.sent!==key?" off":"");
+    const sw=document.createElement("span"); sw.className="sw"; sw.style.background=css(varName);
+    const tx=document.createTextNode(`${label} ${total?Math.round(counts[key]/total*100):0}%`);
+    k.append(sw,tx);
+    k.addEventListener("click",()=>setFilter("sent", state.sent===key?"all":key));
+    leg.appendChild(k);
+  });
+
+  fillTable("tvDonut", ["Sentiment","Recensioni","Quota"],
+    SENT_META.map(([key,label])=>[label, fmt(counts[key]),
+      (total?Math.round(counts[key]/total*100):0)+"%"]), [1,2]);
+}
+
+/* ---------------- trend mensile ---------------- */
+function renderTrend(rows){
+  const wrap=document.getElementById("trendWrap"); wrap.replaceChildren();
+  const byM=new Map();
+  rows.forEach(f=>{ const m=f.d.slice(0,7);
+    (byM.get(m)||byM.set(m,{s:0,n:0}).get(m)); const o=byM.get(m); o.s+=f.st; o.n++; });
+  const months=[...byM.keys()].sort();
+  if (months.length<2){ wrap.innerHTML='<div class="empty">Dati insufficienti per il trend in questo filtro.</div>';
+    fillTable("tvTrend",["Mese","Rating medio","Recensioni"],
+      months.map(m=>[m,(byM.get(m).s/byM.get(m).n).toFixed(2),fmt(byM.get(m).n)]),[1,2]);
+    return; }
+  const svgNS="http://www.w3.org/2000/svg";
+  const W=560,H=190,L=34,Rm=26,T=12,B=34, pw=W-L-Rm, ph=H-T-B;
+  const svg=document.createElementNS(svgNS,"svg");
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width","100%");
+  svg.setAttribute("role","img"); svg.setAttribute("aria-label","Rating medio per mese");
+  const x=i=>L+(months.length===1?pw/2:i/(months.length-1)*pw);
+  const y=v=>T+ph-(v/5)*ph;
+  [1,2,3,4,5].forEach(v=>{
+    const g=document.createElementNS(svgNS,"line");
+    g.setAttribute("x1",L); g.setAttribute("x2",W-Rm);
+    g.setAttribute("y1",y(v)); g.setAttribute("y2",y(v));
+    g.setAttribute("stroke",css("--grid")); g.setAttribute("stroke-width","1");
+    svg.appendChild(g);
+    const t=document.createElementNS(svgNS,"text");
+    t.setAttribute("x",L-6); t.setAttribute("y",y(v)+3); t.setAttribute("text-anchor","end");
+    t.setAttribute("font-size","9"); t.setAttribute("fill",css("--ink-3"));
+    t.textContent=v; svg.appendChild(t);
+  });
+  const base=document.createElementNS(svgNS,"line");
+  base.setAttribute("x1",L); base.setAttribute("x2",W-Rm);
+  base.setAttribute("y1",y(0)); base.setAttribute("y2",y(0));
+  base.setAttribute("stroke",css("--baseline")); svg.appendChild(base);
+  const pts=months.map((m,i)=>[x(i), y(byM.get(m).s/byM.get(m).n)]);
+  const area=document.createElementNS(svgNS,"path");
+  area.setAttribute("d","M"+pts.map(p=>p.join(" ")).join(" L")+
+    ` L${pts[pts.length-1][0]} ${y(0)} L${pts[0][0]} ${y(0)} Z`);
+  area.setAttribute("fill",css("--s1")); area.setAttribute("opacity","0.10");
+  svg.appendChild(area);
+  const line=document.createElementNS(svgNS,"path");
+  line.setAttribute("d","M"+pts.map(p=>p.join(" ")).join(" L"));
+  line.setAttribute("fill","none"); line.setAttribute("stroke",css("--s1"));
+  line.setAttribute("stroke-width","2"); line.setAttribute("stroke-linejoin","round");
+  line.setAttribute("stroke-linecap","round"); svg.appendChild(line);
+  const end=document.createElementNS(svgNS,"circle");
+  end.setAttribute("cx",pts[pts.length-1][0]); end.setAttribute("cy",pts[pts.length-1][1]);
+  end.setAttribute("r","4"); end.setAttribute("fill",css("--s1"));
+  end.setAttribute("stroke",css("--surface-1")); end.setAttribute("stroke-width","2");
+  svg.appendChild(end);
+  const endLbl=document.createElementNS(svgNS,"text");
+  const lastAvg=(byM.get(months[months.length-1]).s/byM.get(months[months.length-1]).n);
+  endLbl.setAttribute("x",Math.min(pts[pts.length-1][0], W-Rm-4));
+  endLbl.setAttribute("y",Math.max(pts[pts.length-1][1]-9, 10));
+  endLbl.setAttribute("text-anchor","end"); endLbl.setAttribute("font-size","10");
+  endLbl.setAttribute("font-weight","600"); endLbl.setAttribute("fill",css("--ink-1"));
+  endLbl.textContent=lastAvg.toFixed(2); svg.appendChild(endLbl);
+  const step=Math.max(1,Math.ceil(months.length/8));
+  months.forEach((m,i)=>{ if(i%step && i!==months.length-1) return;
+    const t=document.createElementNS(svgNS,"text");
+    t.setAttribute("x",x(i)); t.setAttribute("y",H-14); t.setAttribute("text-anchor","middle");
+    t.setAttribute("font-size","9"); t.setAttribute("fill",css("--ink-3"));
+    t.textContent=m.slice(2).replace("-","/"); svg.appendChild(t); });
+  /* crosshair */
+  const ch=document.createElementNS(svgNS,"line");
+  ch.setAttribute("y1",T); ch.setAttribute("y2",T+ph);
+  ch.setAttribute("stroke",css("--baseline")); ch.setAttribute("stroke-width","1");
+  ch.setAttribute("opacity","0"); svg.appendChild(ch);
+  const hover=document.createElementNS(svgNS,"rect");
+  hover.setAttribute("x",L); hover.setAttribute("y",T);
+  hover.setAttribute("width",pw); hover.setAttribute("height",ph);
+  hover.setAttribute("fill","transparent");
+  hover.addEventListener("pointermove",e=>{
+    const r=svg.getBoundingClientRect();
+    const px=(e.clientX-r.left)/r.width*W;
+    let bi=0,bd=1e9;
+    pts.forEach((p,i)=>{ const d=Math.abs(p[0]-px); if(d<bd){bd=d;bi=i;} });
+    ch.setAttribute("x1",pts[bi][0]); ch.setAttribute("x2",pts[bi][0]);
+    ch.setAttribute("opacity","1");
+    const m=months[bi], o=byM.get(m);
+    ttShow(e,[[ "rating medio · "+m, (o.s/o.n).toFixed(2), css("--s1")],
+              [ "recensioni", fmt(o.n), null]]);
+  });
+  hover.addEventListener("pointerleave",()=>{ ch.setAttribute("opacity","0"); ttHide(); });
+  svg.appendChild(hover);
+  wrap.appendChild(svg);
+  fillTable("tvTrend",["Mese","Rating medio","Recensioni"],
+    months.map(m=>[m,(byM.get(m).s/byM.get(m).n).toFixed(2),fmt(byM.get(m).n)]),[1,2]);
+}
+
+/* ---------------- temi: diverging bars ---------------- */
+function renderTopics(rows){
+  const wrap=document.getElementById("topicsWrap"); wrap.replaceChildren();
+  const agg=new Map();
+  rows.forEach(f=>f.topics.forEach(t=>{
+    const o=agg.get(t)||{pos:0,neu:0,neg:0,tot:0};
+    o[sentClass(f)]++; o.tot++; agg.set(t,o); }));
+  const topics=[...agg.entries()].sort((a,b)=>b[1].tot-a[1].tot).slice(0,10);
+  if(!topics.length){ wrap.innerHTML='<div class="empty">Nessun tema nel filtro corrente.</div>';
+    fillTable("tvTopics",["Tema","Negative","Neutre","Positive","Totale"],[],[]); return; }
+  const maxSide=Math.max(...topics.map(([,o])=>Math.max(o.pos,o.neg)));
+  topics.forEach(([t,o])=>{
+    const row=document.createElement("div");
+    row.className="topic-row"+(state.topic===t?" sel":"");
+    row.setAttribute("tabindex","0"); row.setAttribute("role","button");
+    row.setAttribute("aria-label",
+      `${TOPIC_LABELS(t)}: ${o.neg} negative, ${o.neu} neutre, ${o.pos} positive`);
+    const name=document.createElement("div"); name.className="tn";
+    name.textContent=TOPIC_LABELS(t); row.appendChild(name);
+    const svgNS="http://www.w3.org/2000/svg";
+    const W=480,H=26,C=W/2;
+    const svg=document.createElementNS(svgNS,"svg");
+    svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width","100%");
+    const scale=v=>maxSide? (v/maxSide)*(C-46):0;
+    const mk=(w,dir,color)=>{ if(w<=0) return null;
+      const r=document.createElementNS(svgNS,"rect");
+      const px=Math.max(2,w);
+      r.setAttribute("x",dir<0?C-px-1:C+1); r.setAttribute("y",4);
+      r.setAttribute("width",px); r.setAttribute("height",18);
+      r.setAttribute("rx","4");
+      r.setAttribute("fill",color);
+      return r; };
+    const nb=mk(scale(o.neg),-1,css("--neg")); if(nb) svg.appendChild(nb);
+    const pb=mk(scale(o.pos), 1,css("--pos")); if(pb) svg.appendChild(pb);
+    const ax=document.createElementNS(svgNS,"line");
+    ax.setAttribute("x1",C); ax.setAttribute("x2",C);
+    ax.setAttribute("y1",1); ax.setAttribute("y2",H-1);
+    ax.setAttribute("stroke",css("--baseline")); svg.appendChild(ax);
+    const ln=document.createElementNS(svgNS,"text");   /* valori alle estremità */
+    ln.setAttribute("x",C-scale(o.neg)-6); ln.setAttribute("y",17);
+    ln.setAttribute("text-anchor","end"); ln.setAttribute("font-size","10");
+    ln.setAttribute("fill",css("--ink-2")); ln.textContent=o.neg||"";
+    const lp=document.createElementNS(svgNS,"text");
+    lp.setAttribute("x",C+scale(o.pos)+6); lp.setAttribute("y",17);
+    lp.setAttribute("font-size","10"); lp.setAttribute("fill",css("--ink-2"));
+    lp.textContent=o.pos||"";
+    svg.append(ln,lp);
+    row.appendChild(svg);
+    const show=e=>ttShow(e,[
+      [ "negative", fmt(o.neg), css("--neg")],
+      [ "neutre",   fmt(o.neu), css("--neu")],
+      [ "positive", fmt(o.pos), css("--pos")],
+      [ TOPIC_LABELS(t)+" · totale", fmt(o.tot), null]]);
+    row.addEventListener("pointermove",show);
+    row.addEventListener("pointerleave",ttHide);
+    row.addEventListener("focus",e=>ttShow({clientX:innerWidth/2,clientY:innerHeight/2},
+      [[TOPIC_LABELS(t), `${o.neg} neg · ${o.neu} neu · ${o.pos} pos`, null]]));
+    row.addEventListener("blur",ttHide);
+    const act=()=>setFilter("topic", state.topic===t?"all":t);
+    row.addEventListener("click",act);
+    row.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();act();} });
+    wrap.appendChild(row);
+  });
+  fillTable("tvTopics",["Tema","Negative","Neutre","Positive","Totale"],
+    topics.map(([t,o])=>[TOPIC_LABELS(t),fmt(o.neg),fmt(o.neu),fmt(o.pos),fmt(o.tot)]),[1,2,3,4]);
+}
+
+/* ---------------- lista recensioni ---------------- */
+function renderReviews(rows){
+  const list=document.getElementById("revList"); list.replaceChildren();
+  document.getElementById("revCount").textContent=`· ${fmt(rows.length)} nel filtro`;
+  const sorted=[...rows].sort((a,b)=>b.d.localeCompare(a.d));
+  const shown=sorted.slice(0,state.shown);
+  if(!shown.length){ list.innerHTML='<div class="empty">Nessuna recensione con questi filtri.</div>'; }
+  shown.forEach(f=>{
+    const d=document.createElement("div"); d.className="rev";
+    const stars=document.createElement("span"); stars.className="stars";
+    stars.textContent="★".repeat(Math.round(f.st))+"☆".repeat(5-Math.round(f.st));
+    const txt=document.createElement("div"); txt.textContent=" "+(f.txt||"(solo rating)");
+    txt.style.display="inline";
+    d.append(stars,txt);
+    const meta=document.createElement("div"); meta.className="meta";
+    const dot=document.createElement("span"); dot.className="sw";
+    dot.style.background=css(SOURCE_SLOT[f.s]||"--s1");
+    dot.style.borderRadius="50%"; dot.style.width="8px"; dot.style.height="8px";
+    const src=document.createElement("span");
+    src.textContent=(SOURCE_LABELS[f.s]||f.s)+" · "+f.d.slice(0,10);
+    meta.append(dot,src);
+    if(f.rep){ const b=document.createElement("span"); b.className="badge rep";
+      b.textContent="✓ risposta inviata"; meta.appendChild(b); }
+    else if(f.st<=2){ const b=document.createElement("span"); b.className="badge urg";
+      b.textContent="da gestire"; meta.appendChild(b); }
+    f.topics.forEach(t=>{ const c=document.createElement("button");
+      c.className="chip"; c.type="button"; c.textContent=TOPIC_LABELS(t);
+      c.addEventListener("click",()=>setFilter("topic", state.topic===t?"all":t));
+      meta.appendChild(c); });
+    d.appendChild(meta);
+    list.appendChild(d);
+  });
+  const more=document.getElementById("moreBtn");
+  more.classList.toggle("hidden", sorted.length<=state.shown);
+  more.textContent=`Mostra altre (${fmt(sorted.length-state.shown)} rimanenti)`;
+}
+
+/* ---------------- tabelle (vista accessibile) ---------------- */
+function fillTable(id, headers, rows, numericCols){
+  const tb=document.getElementById(id); tb.replaceChildren();
+  const trh=document.createElement("tr");
+  headers.forEach((h,i)=>{ const th=document.createElement("th");
+    th.textContent=h; if(numericCols.includes(i)) th.className="n"; trh.appendChild(th); });
+  tb.appendChild(trh);
+  rows.forEach(r=>{ const tr=document.createElement("tr");
+    r.forEach((c,i)=>{ const td=document.createElement("td");
+      td.textContent=c; if(numericCols.includes(i)) td.className="n"; tr.appendChild(td); });
+    tb.appendChild(tr); });
+}
+
+/* ---------------- analisi & suggerimenti ---------------- */
+const SUGG_RE = /(dovreste|dovrebbero|sarebbe (?:meglio|utile)|consiglio di|suggerisco|manca(?:no)?\b|potreste|perch[eé] non|andrebbe)/i;
+const SEV_LABEL = { critical:"CRITICO", serious:"DA GESTIRE", warning:"ATTENZIONE", good:"PUNTO DI FORZA" };
+let lastRunKey = null;
+
+function filterKey(){
+  return JSON.stringify([state.period,state.source,state.sent,state.topic,state.search]);
+}
+
+function extractSuggestions(rows){
+  const seen=new Set(), out=[];
+  [...rows].sort((a,b)=>b.d.localeCompare(a.d)).forEach(f=>{
+    if(!f.txt || !SUGG_RE.test(f.txt)) return;
+    const sentence=f.txt.split(/(?<=[.!?])\s+/).find(s=>SUGG_RE.test(s));
+    if(!sentence) return;
+    const key=sentence.trim().toLowerCase();
+    if(seen.has(key)) return;
+    seen.add(key);
+    out.push({ q:sentence.trim(), f });
+  });
+  return out.slice(0,8);
+}
+
+function computeFindings(rows){
+  const out=[];
+  if(!rows.length) return out;
+  const n=rows.length;
+  /* stats per tema */
+  const agg=new Map();
+  rows.forEach(f=>f.topics.forEach(t=>{
+    const o=agg.get(t)||{pos:0,neu:0,neg:0,tot:0};
+    o[sentClass(f)]++; o.tot++; agg.set(t,o); }));
+  const themes=[...agg.entries()];
+  /* 1. tema più critico */
+  const critical=themes.filter(([,o])=>o.tot>=3 && o.neg/o.tot>=0.3)
+    .sort((a,b)=>b[1].neg-a[1].neg)[0];
+  if(critical){
+    const [t,o]=critical;
+    out.push({ sev:"critical",
+      title:`"${TOPIC_LABELS(t)}" guida l'insoddisfazione`,
+      detail:`${o.neg} menzioni negative su ${o.tot} (${Math.round(o.neg/o.tot*100)}%) nel periodo filtrato.`,
+      action:`Aprire un task interno sul tema e rispondere alle ${o.neg} recensioni negative citandolo.` });
+  }
+  /* 2. trend ultimi 30gg vs 60 precedenti */
+  const d30=NOW-30*MS_DAY, d90=NOW-90*MS_DAY;
+  const rec=rows.filter(f=>new Date(f.d)>=d30);
+  const prev=rows.filter(f=>{ const d=new Date(f.d); return d>=d90 && d<d30; });
+  if(rec.length>=3 && prev.length>=3){
+    const ra=rec.reduce((a,f)=>a+f.st,0)/rec.length;
+    const pa=prev.reduce((a,f)=>a+f.st,0)/prev.length;
+    const delta=ra-pa;
+    if(delta<=-0.3) out.push({ sev:"critical",
+      title:"Rating in peggioramento nelle ultime settimane",
+      detail:`Media ultimi 30 giorni ${ra.toFixed(2)}★ vs ${pa.toFixed(2)}★ dei 60 precedenti (${delta.toFixed(2)}).`,
+      action:"Verificare cosa è cambiato di recente (menu, personale, fornitori) prima che il trend consolidi lo score." });
+    else if(delta>=0.3) out.push({ sev:"good",
+      title:"Rating in miglioramento",
+      detail:`Media ultimi 30 giorni ${ra.toFixed(2)}★ vs ${pa.toFixed(2)}★ precedenti (+${delta.toFixed(2)}).`,
+      action:"Consolidare: chiedere recensioni ora massimizza l'effetto sullo score." });
+  }
+  /* 3. risposte mancanti */
+  const unansweredNeg=rows.filter(f=>f.st<=2 && !f.rep).length;
+  const rr=rows.filter(f=>f.rep).length/n;
+  if(unansweredNeg>0) out.push({ sev:"serious",
+    title:`${unansweredNeg} recensioni critiche senza risposta`,
+    detail:`Tasso di risposta complessivo ${Math.round(rr*100)}% (target 60%). Le negative senza risposta pesano doppio sulla percezione.`,
+    action:"Rispondere entro 24h partendo dalle più recenti: è la leva più rapida sulla componente engagement dello score." });
+  else if(rr<0.6) out.push({ sev:"warning",
+    title:"Tasso di risposta sotto il target",
+    detail:`Risponde al ${Math.round(rr*100)}% delle recensioni (target 60%).`,
+    action:"Attivare le risposte suggerite anche sulle recensioni positive: ringraziare aumenta la conversione dei lettori." });
+  /* 4. leva positiva */
+  const best=themes.filter(([,o])=>o.tot>=3 && o.pos/o.tot>=0.7)
+    .sort((a,b)=>b[1].pos-a[1].pos)[0];
+  if(best){
+    const [t,o]=best;
+    out.push({ sev:"good",
+      title:`"${TOPIC_LABELS(t)}" è la leva da amplificare`,
+      detail:`${o.pos} menzioni positive su ${o.tot} (${Math.round(o.pos/o.tot*100)}%).`,
+      action:"Usarla nella comunicazione (sito, social, risposte) e nei solleciti recensione: è ciò che i clienti già amano." });
+  }
+  /* 5. volume */
+  if(rec.length<5) out.push({ sev:"warning",
+    title:"Poche recensioni recenti",
+    detail:`${rec.length===1?"Solo 1 recensione":"Solo "+rec.length+" recensioni"} negli ultimi 30 giorni: lo score è esposto a ogni singola nuova recensione.`,
+    action:"Avviare una campagna di sollecito post-visita (QR, link, WhatsApp) per aumentare volume e stabilità." });
+  return out.slice(0,5);
+}
+
+const AI_ENDPOINT = (DATA.business_id
+  ? `/businesses/${DATA.business_id}/analyze` : null);
+
+async function runAnalysis(){
+  const btn=document.getElementById("btnAnalyze");
+  btn.disabled=true;
+  btn.replaceChildren();
+  const sp=document.createElement("span"); sp.className="spin";
+  btn.append(sp, document.createTextNode(" Analisi in corso…"));
+  const rows=filtered();
+  let handled=false;
+  /* prova l'AI (stadio 3); se non c'è o fallisce → motore locale (stadio 0) */
+  if (AI_ENDPOINT && rows.length){
+    try{
+      const payload={ business_name: DATA.business_name || DATA.business_id,
+        rows: rows.map(f=>({d:f.d,s:f.s,st:f.st,rep:f.rep,topics:f.topics,txt:f.txt})) };
+      const r=await fetch(AI_ENDPOINT,{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      const j=await r.json();
+      if(j.ok){ renderAnalysis(rows, j); handled=true; }
+    }catch(e){ /* fallback silenzioso */ }
+  }
+  if(!handled) renderAnalysis(rows);   /* motore locale */
+  lastRunKey=filterKey();
+  document.getElementById("staleNote").classList.add("hidden");
+  document.getElementById("analysisWrap").classList.remove("hidden");
+  btn.disabled=false; btn.textContent="↻ Riesegui analisi";
+}
+
+function renderAnalysis(rows, ai){
+  /* badge sorgente analisi */
+  const src=document.getElementById("anSource");
+  if(src){ src.textContent = ai && ai.mode
+    ? "⚡ generata da "+ai.mode : "⚙ motore locale (stadio 0)"; }
+  /* summary AI opzionale */
+  const sm=document.getElementById("anSummary");
+  if(sm){ if(ai && ai.summary){ sm.textContent=ai.summary; sm.classList.remove("hidden"); }
+    else sm.classList.add("hidden"); }
+
+  const fl=document.getElementById("findList"); fl.replaceChildren();
+  const findings=(ai && ai.findings && ai.findings.length)
+    ? ai.findings : computeFindings(rows);
+  if(!findings.length){
+    const d=document.createElement("div"); d.className="empty";
+    d.textContent="Nessun dato sufficiente nel filtro corrente."; fl.appendChild(d);
+  }
+  findings.forEach(f=>{
+    const card=document.createElement("div"); card.className="find "+f.sev;
+    const t=document.createElement("div"); t.className="ft";
+    const sev=document.createElement("span"); sev.className="sev";
+    sev.textContent=SEV_LABEL[f.sev];
+    t.append(sev, document.createTextNode(f.title));
+    const de=document.createElement("div"); de.className="fd"; de.textContent=f.detail;
+    const ac=document.createElement("div"); ac.className="fa";
+    const b=document.createElement("b"); b.textContent="Azione: ";
+    ac.append(b, document.createTextNode(f.action));
+    card.append(t,de,ac); fl.appendChild(card);
+  });
+  const sl=document.getElementById("suggList"); sl.replaceChildren();
+  if(ai && ai.suggestions && ai.suggestions.length){
+    ai.suggestions.forEach(s=>{
+      const card=document.createElement("div"); card.className="sugg";
+      const qd=document.createElement("div"); qd.className="q";
+      qd.textContent="“"+s.q+"”";
+      const meta=document.createElement("div"); meta.className="meta";
+      meta.textContent=s.label||"";
+      card.append(qd,meta); sl.appendChild(card);
+    });
+    return;
+  }
+  const suggs=extractSuggestions(rows);
+  if(!suggs.length){
+    const d=document.createElement("div"); d.className="empty";
+    d.textContent="Nessun suggerimento esplicito nelle recensioni filtrate."; sl.appendChild(d);
+  }
+  suggs.forEach(({q,f})=>{
+    const card=document.createElement("div"); card.className="sugg";
+    const qd=document.createElement("div"); qd.className="q"; qd.textContent="“"+q+"”";
+    const meta=document.createElement("div"); meta.className="meta";
+    const dot=document.createElement("span"); dot.className="sw";
+    dot.style.background=css(SOURCE_SLOT[f.s]||"--s1");
+    dot.style.borderRadius="50%"; dot.style.width="8px"; dot.style.height="8px";
+    const src=document.createElement("span");
+    src.textContent=(SOURCE_LABELS[f.s]||f.s)+" · "+f.d.slice(0,10)+" · "+
+      "★".repeat(Math.round(f.st));
+    meta.append(dot,src);
+    f.topics.slice(0,2).forEach(t=>{ const c=document.createElement("button");
+      c.className="chip"; c.type="button"; c.textContent=TOPIC_LABELS(t);
+      c.addEventListener("click",()=>setFilter("topic", state.topic===t?"all":t));
+      meta.appendChild(c); });
+    card.append(qd,meta); sl.appendChild(card);
+  });
+}
+
+/* ---------------- orchestrazione ---------------- */
+function renderAll(){
+  const rows=filtered();
+  renderKpis(rows); renderDonut(rows); renderTrend(rows);
+  renderTopics(rows); renderReviews(rows);
+  syncControls();
+  /* analisi eseguita su filtri diversi da quelli correnti → avviso */
+  const stale=document.getElementById("staleNote");
+  stale.classList.toggle("hidden", lastRunKey===null || lastRunKey===filterKey());
+}
+function setFilter(key,val){ state[key]=val; state.shown=20; renderAll(); }
+function syncControls(){
+  document.getElementById("fPeriod").value=state.period;
+  document.getElementById("fSource").value=state.source;
+  document.getElementById("fSent").value=state.sent;
+  document.getElementById("fTopic").value=state.topic;
+}
+
+/* popolamento select */
+(function initControls(){
+  const srcSel=document.getElementById("fSource");
+  [...new Set(DATA.feedback.map(f=>f.s))].sort().forEach(s=>{
+    const o=document.createElement("option"); o.value=s;
+    o.textContent=SOURCE_LABELS[s]||s; srcSel.appendChild(o); });
+  const topicSel=document.getElementById("fTopic");
+  const all=new Map();
+  DATA.feedback.forEach(f=>f.topics.forEach(t=>all.set(t,(all.get(t)||0)+1)));
+  [...all.entries()].sort((a,b)=>b[1]-a[1]).forEach(([t])=>{
+    const o=document.createElement("option"); o.value=t;
+    o.textContent=TOPIC_LABELS(t); topicSel.appendChild(o); });
+  document.getElementById("fPeriod").addEventListener("change",e=>setFilter("period",e.target.value));
+  srcSel.addEventListener("change",e=>setFilter("source",e.target.value));
+  document.getElementById("fSent").addEventListener("change",e=>setFilter("sent",e.target.value));
+  topicSel.addEventListener("change",e=>setFilter("topic",e.target.value));
+  let deb;
+  document.getElementById("fSearch").addEventListener("input",e=>{
+    clearTimeout(deb); deb=setTimeout(()=>setFilter("search",e.target.value),200); });
+  document.getElementById("fReset").addEventListener("click",()=>{
+    Object.assign(state,{period:"all",source:"all",sent:"all",topic:"all",search:"",shown:20});
+    document.getElementById("fSearch").value=""; renderAll(); });
+  document.getElementById("moreBtn").addEventListener("click",()=>{
+    state.shown+=30; renderAll(); });
+  document.querySelectorAll(".tgl").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const tv=document.getElementById(btn.dataset.tv);
+      const chart=tv.parentElement.querySelector("div[id$='Wrap']");
+      const showTable=tv.classList.contains("hidden");
+      tv.classList.toggle("hidden",!showTable);
+      if(chart) chart.classList.toggle("hidden",showTable);
+      btn.textContent=showTable?"◫ grafico":"⊞ tabella";
+    }); });
+  document.getElementById("btnAnalyze").addEventListener("click",runAnalysis);
+  document.getElementById("btnReanalyze").addEventListener("click",runAnalysis);
+  if(location.hash==="#analisi") setTimeout(runAnalysis,50);
+  document.getElementById("themeBtn").addEventListener("click",()=>{
+    const cur=document.documentElement.dataset.theme||
+      (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+    document.documentElement.dataset.theme=cur==="dark"?"light":"dark";
+    renderAll();   /* i colori svg sono risolti da css var a render */
+  });
+})();
+renderAll();
+</script>
+</body>
+</html>
