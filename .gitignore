@@ -16,3 +16,7 @@ search_page_demo.html
 .DS_Store
 ziEAneqh
 ziTpibWM
+_to_delete/
+_ekko_auth_deploy.tgz
+ekko_sync.tgz
+*.db

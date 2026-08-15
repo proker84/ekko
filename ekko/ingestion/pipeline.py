@@ -25,9 +25,9 @@ class IngestReport:
     total_cost_eur: float = 0.0
 
 
-def save_business(business: BusinessRef) -> None:
+def save_business(business: BusinessRef, owner_id: str | None = None) -> None:
     db.init_db()
-    db.upsert_business(business)
+    db.upsert_business(business, owner_id=owner_id)
 
 
 def ingest(business: BusinessRef, connectors: list[BaseConnector],

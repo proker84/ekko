@@ -28,7 +28,15 @@ def _db_path() -> str:
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS businesses (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, payload TEXT NOT NULL
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, payload TEXT NOT NULL,
+  owner_id TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_businesses_owner ON businesses(owner_id);
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,          -- 'sub' Google (stabile)
+  email TEXT,
+  name TEXT,
+  created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS feedback (
   id TEXT PRIMARY KEY,
@@ -67,14 +75,41 @@ def init_db() -> None:
     Path(_db_path()).parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as c:
         c.executescript(SCHEMA)
+        # migrazione difensiva: aggiunge owner_id ai DB creati prima del multi-tenant
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(businesses)")}
+        if "owner_id" not in cols:
+            c.execute("ALTER TABLE businesses ADD COLUMN owner_id TEXT")
 
 
-def upsert_business(business: BusinessRef) -> None:
+def upsert_business(business: BusinessRef, owner_id: str | None = None) -> None:
+    """Salva/aggiorna l'azienda. owner_id=None non sovrascrive il proprietario
+    esistente (COALESCE): così i re-upsert interni alla pipeline conservano
+    l'agenzia impostata alla prima ricerca."""
     with get_conn() as c:
         c.execute(
-            "INSERT INTO businesses(id,name,payload) VALUES(?,?,?) "
-            "ON CONFLICT(id) DO UPDATE SET name=excluded.name, payload=excluded.payload",
-            (business.id, business.name, business.model_dump_json()),
+            "INSERT INTO businesses(id,name,payload,owner_id) VALUES(?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET name=excluded.name, "
+            "payload=excluded.payload, "
+            "owner_id=COALESCE(excluded.owner_id, businesses.owner_id)",
+            (business.id, business.name, business.model_dump_json(), owner_id),
+        )
+
+
+def get_business_owner(business_id: str) -> str | None:
+    init_db()
+    with get_conn() as c:
+        row = c.execute("SELECT owner_id FROM businesses WHERE id=?",
+                        (business_id,)).fetchone()
+    return row["owner_id"] if row else None
+
+
+def upsert_user(sub: str, email: str | None, name: str | None,
+                created_at: datetime) -> None:
+    with get_conn() as c:
+        c.execute(
+            "INSERT INTO users(id,email,name,created_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET email=excluded.email, name=excluded.name",
+            (sub, email, name, created_at.isoformat()),
         )
 
 
@@ -120,14 +155,18 @@ def get_business_name(business_id: str) -> str | None:
     return row["name"] if row else None
 
 
-def list_businesses(limit: int = 8) -> list[dict]:
-    """Aziende con almeno una recensione, più recenti prima (per la home)."""
+def list_businesses(limit: int = 8, owner_id: str | None = None) -> list[dict]:
+    """Aziende con almeno una recensione, più recenti prima (per la home).
+    Se owner_id è passato, mostra SOLO le aziende di quell'agenzia (isolamento)."""
     init_db()
+    where = "WHERE b.owner_id=?" if owner_id is not None else ""
+    args: tuple = (owner_id, limit) if owner_id is not None else (limit,)
     with get_conn() as c:
         rows = c.execute(
             "SELECT b.id, b.name, COUNT(f.id) cnt, MAX(f.published_at) last "
             "FROM businesses b JOIN feedback f ON f.business_id=b.id "
-            "GROUP BY b.id, b.name ORDER BY last DESC LIMIT ?", (limit,)
+            f"{where} "
+            "GROUP BY b.id, b.name ORDER BY last DESC LIMIT ?", args
         ).fetchall()
     return [{"id": r["id"], "name": r["name"], "count": r["cnt"]} for r in rows]
 

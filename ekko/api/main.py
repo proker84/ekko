@@ -15,15 +15,22 @@ Avvio:  python -m ekko.api.main   (porta 8000)
 """
 from __future__ import annotations
 
+import functools
+import hashlib
+import hmac
 import os
+import secrets
 from collections import Counter
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, request
+from flask import (Flask, abort, jsonify, redirect, request, session,
+                   url_for)
 from jinja2 import Environment, FileSystemLoader
 
 from ekko.ai.gateway import AIGateway
+from ekko.auth import google_oauth
 from ekko.connectors.google import GoogleConnector
 from ekko.connectors.trustpilot import TrustpilotConnector
 from ekko.connectors import trustpilot_public
@@ -33,10 +40,70 @@ from ekko.ingestion.pipeline import (ingest, load_feedback, save_business,
 from ekko.storage import db
 
 app = Flask("ekko")
+# Chiave di firma dei cookie di sessione. In produzione impostare EKKO_SECRET_KEY
+# (env var su Render) così le sessioni sopravvivono ai riavvii; in locale si
+# genera al volo.
+app.secret_key = os.environ.get("EKKO_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    # cookie sicuro quando siamo dietro il proxy TLS di Render
+    SESSION_COOKIE_SECURE=bool(os.environ.get("EKKO_BASE_URL", "").startswith("https")),
+)
 _templates = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"),
     autoescape=True,
 )
+
+
+# --------------------------------------------------------------------------
+# Multi-tenant: ogni agenzia vede solo le proprie aziende/recensioni.
+# --------------------------------------------------------------------------
+def _base_url() -> str:
+    return os.environ.get("EKKO_BASE_URL") or request.url_root.rstrip("/")
+
+
+def owner_key(sub: str) -> str:
+    """ID agenzia breve e stabile, derivato dal 'sub' Google (o 'pub' se il
+    login è disattivato). Prefissa gli id-azienda così due agenzie che
+    analizzano la stessa impresa restano isolate."""
+    if not google_oauth.enabled():
+        return "pub"
+    h = hashlib.sha256(sub.encode("utf-8")).hexdigest()
+    return "a" + h[:10]
+
+
+def current_owner():
+    """Ritorna (owner_id, is_logged) per la richiesta corrente.
+    Login disattivato -> owner condiviso 'pub' (comportamento single-tenant)."""
+    if not google_oauth.enabled():
+        return "pub", True
+    uid = session.get("uid")
+    if not uid:
+        return None, False
+    return owner_key(uid), True
+
+
+def login_required(fn):
+    @functools.wraps(fn)
+    def _wrap(*a, **k):
+        owner, ok = current_owner()
+        if not ok:
+            return redirect(url_for("login"))
+        return fn(*a, **k)
+    return _wrap
+
+
+def _require_owner_of(business_id: str) -> str:
+    """Verifica che l'azienda appartenga all'agenzia loggata; altrimenti 403/redirect."""
+    owner, ok = current_owner()
+    if not ok:
+        abort(401)
+    biz_owner = db.get_business_owner(business_id)
+    # aziende legacy senza proprietario (pre multi-tenant) sono visibili a tutti
+    if biz_owner is not None and biz_owner != owner:
+        abort(403)
+    return owner
 
 
 def default_connectors() -> list:
@@ -71,6 +138,68 @@ def _slugify(name: str) -> str:
     return s or "azienda"
 
 
+@app.get("/login")
+def login():
+    # login disattivato (nessuna credenziale OAuth) -> vai diretto alla home
+    if not google_oauth.enabled():
+        return redirect("/")
+    owner, ok = current_owner()
+    if ok:
+        return redirect("/")
+    tpl = _templates.get_template("login.html")
+    return tpl.render(login_url=url_for("auth_login"))
+
+
+@app.get("/auth/login")
+def auth_login():
+    if not google_oauth.enabled():
+        return redirect("/")
+    state = secrets.token_urlsafe(24)
+    session["oauth_state"] = state
+    return redirect(google_oauth.authorization_url(_base_url(), state))
+
+
+@app.get("/auth/callback")
+def auth_callback():
+    if not google_oauth.enabled():
+        return redirect("/")
+    if request.args.get("error"):
+        return _auth_error("Accesso annullato o negato da Google.")
+    state = request.args.get("state")
+    if not state or state != session.pop("oauth_state", None):
+        return _auth_error("Sessione di login scaduta o non valida. Riprova.")
+    code = request.args.get("code")
+    if not code:
+        return _auth_error("Codice di autorizzazione mancante.")
+    try:
+        profile = google_oauth.exchange_code(_base_url(), code)
+    except Exception as e:  # noqa: BLE001
+        return _auth_error(f"Errore nello scambio del token: {str(e)[:160]}")
+    if not profile.get("sub"):
+        return _auth_error("Profilo Google incompleto (manca l'identificativo).")
+    db.upsert_user(profile["sub"], profile.get("email"), profile.get("name"),
+                   datetime.now(timezone.utc))
+    session["uid"] = profile["sub"]
+    session["email"] = profile.get("email")
+    session["name"] = profile.get("name")
+    return redirect("/")
+
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    return redirect("/login" if google_oauth.enabled() else "/")
+
+
+def _auth_error(msg: str):
+    return (
+        "<html><head><meta charset='utf-8'><title>Ekko · Login</title>"
+        "<style>body{font-family:system-ui;max-width:520px;margin:80px auto;"
+        "padding:0 20px;color:#1a1f2e;text-align:center}a{color:#2456e6}</style>"
+        f"</head><body><h2>Accesso non riuscito</h2><p>{msg}</p>"
+        "<p><a href='/login'>← Riprova ad accedere</a></p></body></html>"), 400
+
+
 @app.get("/health")
 def health():
     gw = AIGateway()
@@ -81,26 +210,33 @@ def health():
 
 
 @app.get("/")
+@login_required
 def home():
     gw = AIGateway()
+    owner, _ = current_owner()
     tpl = _templates.get_template("search.html")
     return tpl.render(
-        recent=db.list_businesses(),
+        recent=db.list_businesses(owner_id=owner),
         google_on=bool(os.environ.get("GOOGLE_MAPS_API_KEY")),
         tp_on=bool(os.environ.get("TRUSTPILOT_API_KEY")),
         tp_public_on=trustpilot_public.enabled(),
         ai_on=gw.available(),
         ai_label=f" · {gw.provider}" if gw.available() else "",
+        auth_on=google_oauth.enabled(),
+        user_name=session.get("name"),
+        user_email=session.get("email"),
     )
 
 
 @app.post("/search")
+@login_required
 def search():
+    owner, _ = current_owner()
     name = (request.form.get("name") or "").strip()
     if not name:
         return redirect("/")
     business = BusinessRef(
-        id=_slugify(name),
+        id=f"{owner}-{_slugify(name)}",  # namespace per-agenzia -> isolamento dati
         name=name,
         city=(request.form.get("city") or "").strip() or None,
         domain=(request.form.get("domain") or "").strip() or None,
@@ -111,7 +247,7 @@ def search():
             business.review_depth = max(10, min(_d, 4490))
     except (TypeError, ValueError):
         pass
-    save_business(business)
+    save_business(business, owner_id=owner)
     from ekko.connectors import dataforseo as _dfs
     # 1) task DataForSEO asincrono (recensioni Google complete): parte in background
     if _dfs.enabled():
@@ -129,10 +265,12 @@ def search():
 
 
 @app.post("/businesses/<business_id>/analyze")
+@login_required
 def analyze(business_id: str):
     """Endpoint AI stadio 3: recensioni filtrate (PII-free) -> findings+suggestions.
     Il body è la lista già filtrata lato client. Se l'AI non è configurata o
     fallisce, il client resta sul motore locale (degrada con grazia)."""
+    _require_owner_of(business_id)
     gw = AIGateway()
     if not gw.available():
         return jsonify(ok=False, reason="ai_not_configured")
@@ -166,7 +304,9 @@ def run_ingest(business_id: str):
 
 
 @app.get("/businesses/<business_id>/score")
+@login_required
 def get_score(business_id: str):
+    _require_owner_of(business_id)
     breakdown = score_business(business_id)
     if breakdown.n_feedback == 0:
         return jsonify(error="Nessun feedback: eseguire prima l'ingestion"), 404
@@ -175,7 +315,9 @@ def get_score(business_id: str):
 
 
 @app.get("/businesses/<business_id>/dashboard")
+@login_required
 def get_dashboard(business_id: str):
+    _require_owner_of(business_id)
     payload = db.get_business_payload(business_id) or {}
     pending = False
     if payload.get("dfs_pending") and payload.get("dfs_task_id"):
@@ -243,7 +385,9 @@ def render_dashboard(business_name: str, breakdown, feedback,
 
 
 @app.get("/businesses/<business_id>/report")
+@login_required
 def get_report(business_id: str):
+    _require_owner_of(business_id)
     feedback = load_feedback(business_id)
     if not feedback:
         return jsonify(error="Nessun feedback: eseguire prima l'ingestion"), 404

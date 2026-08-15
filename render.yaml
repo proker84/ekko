@@ -24,3 +24,12 @@ services:
         value: "1"
       - key: EKKO_AUTHOR_HMAC_KEY
         sync: false
+      # ─── Login agenzie: Accedi con Google (multi-tenant) ───
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false            # da Google Cloud Console (OAuth Client ID web)
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false            # segreto del client OAuth
+      - key: EKKO_SECRET_KEY
+        generateValue: true    # firma i cookie di sessione (sessioni persistenti)
+      - key: EKKO_BASE_URL
+        value: "https://ekko-l58k.onrender.com"  # per redirect_uri e cookie sicuro
