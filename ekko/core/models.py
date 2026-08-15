@@ -51,6 +51,7 @@ class BusinessRef(BaseModel):
     total_reviews_google: Optional[int] = None
     dfs_task_id: Optional[str] = None
     dfs_pending: bool = False
+    review_depth: Optional[int] = None
 
 
 class Urgency(str, Enum):

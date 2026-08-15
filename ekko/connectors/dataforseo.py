@@ -158,7 +158,8 @@ def post_task(business: BusinessRef) -> str | None:
     """Posta il task recensioni Google (priority) e ritorna il task_id."""
     if not os.environ.get("DATAFORSEO_AUTH"):
         return None
-    task = {"language_code": "it", "depth": DEPTH, "priority": 2,
+    depth = business.review_depth or DEPTH
+    task = {"language_code": "it", "depth": depth, "priority": 2,
             "keyword": f"{business.name} {business.city or ''}".strip(),
             "location_name": "Italy"}
     try:

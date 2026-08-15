@@ -30,6 +30,14 @@
   .extra input { flex:1; min-width:140px; border:1px solid
     light-dark(rgba(11,11,11,.10),rgba(255,255,255,.12)); border-radius:8px;
     background:none; color:inherit; padding:8px 10px; font-size:.83rem; }
+  .depth-row { display:flex; align-items:center; gap:10px; border-top:1px solid
+    light-dark(#e1e0d9,#2c2c2a); padding-top:8px; flex-wrap:wrap; font-size:.82rem;
+    color:light-dark(#52514e,#c3c2b7); }
+  .depth-row input[type=number] { width:120px; }
+  .depth-row select, .depth-row input[type=number] { border:1px solid light-dark(rgba(11,11,11,.10),rgba(255,255,255,.12));
+    border-radius:8px; background:none; color:inherit; padding:6px 10px; font-size:.82rem; }
+  .depth-row .cost { color:light-dark(#898781,#898781); font-weight:600; }
+  .depth-hint { font-size:.72rem; color:light-dark(#898781,#898781); margin-top:6px; }
   .hint { color:light-dark(#898781,#898781); font-size:.75rem; margin-top:14px;
     text-align:center; max-width:620px; line-height:1.5; }
   .src { display:inline-flex; align-items:center; gap:5px; margin:0 6px; }
@@ -67,6 +75,20 @@
         <input name="city" placeholder="Città (aiuta Google) — es. Milano">
         <input name="domain" placeholder="Dominio (per Trustpilot) — es. azienda.it">
       </div>
+      <div class="depth-row">
+        <label for="depth">Recensioni da analizzare:</label>
+        <input type="number" name="depth" id="depth" value="200" min="10" max="4490"
+               step="10" list="depthpresets">
+        <datalist id="depthpresets">
+          <option value="50"></option><option value="100"></option>
+          <option value="200"></option><option value="500"></option>
+          <option value="1000"></option><option value="2000"></option>
+          <option value="4490"></option>
+        </datalist>
+        <span class="cost" id="cost"></span>
+      </div>
+      <div class="depth-hint">Scrivi quante ne vuoi. Massimo ~4490 per ricerca
+        (limite Google/DataForSEO); se l'azienda ne ha meno, arrivano quelle disponibili.</div>
     </div>
   </form>
   <div class="working" id="working"><span class="sp"></span>
@@ -98,6 +120,19 @@ document.getElementById("f").addEventListener("submit",()=>{
   document.getElementById("go").disabled=true;
   document.getElementById("working").style.display="block";
 });
+
+const COST_PER_REVIEW_EUR = 0.00014; // stima DataForSEO (coda priority) per recensione
+function updateCost(){
+  const d = parseInt(document.getElementById('depth').value, 10) || 0;
+  const eff = Math.min(Math.max(d, 10), 4490);
+  const eur = eff * COST_PER_REVIEW_EUR;
+  let txt = '≈ € ' + eur.toFixed(eur < 0.1 ? 3 : 2) + ' di costo dati (DataForSEO)';
+  if (d > 4490) txt += ' · limitato a 4490';
+  document.getElementById('cost').textContent = txt;
+}
+document.getElementById('depth').addEventListener('input', updateCost);
+document.getElementById('depth').addEventListener('change', updateCost);
+updateCost();
 </script>
 </body>
 </html>

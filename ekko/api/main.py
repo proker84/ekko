@@ -105,6 +105,12 @@ def search():
         city=(request.form.get("city") or "").strip() or None,
         domain=(request.form.get("domain") or "").strip() or None,
     )
+    try:
+        _d = int(request.form.get("depth") or 0)
+        if _d > 0:
+            business.review_depth = max(10, min(_d, 4490))
+    except (TypeError, ValueError):
+        pass
     save_business(business)
     from ekko.connectors import dataforseo as _dfs
     # 1) task DataForSEO asincrono (recensioni Google complete): parte in background
