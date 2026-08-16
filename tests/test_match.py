@@ -103,7 +103,7 @@ class MatchEndpointTest(unittest.TestCase):
         self.assertNotIn("trustpilot", keys)
         self.assertNotIn("autoscout24", keys)
 
-    def test_dataforseo_uses_confirmed_place_id(self):
+    def test_dataforseo_uses_exact_name_not_place_id(self):
         from ekko.core.models import BusinessRef
         captured = {}
 
@@ -124,14 +124,17 @@ class MatchEndpointTest(unittest.TestCase):
         httpx.post = fake_post
         try:
             b = BusinessRef(id="b", name="Acme", city="Milano",
-                            google_place_id="ChIJ123")
+                            google_place_id="ChIJ123",
+                            google_match_name="Acme - Concessionaria Milano")
             tid = self.dfs.post_task(b)
         finally:
             httpx.post = orig
             os.environ.pop("DATAFORSEO_AUTH", None)
         self.assertEqual(tid, "t1")
-        self.assertEqual(captured["task"].get("place_id"), "ChIJ123")
-        self.assertNotIn("keyword", captured["task"])
+        # il place_id di Places NON è compatibile con DataForSEO: si usa il
+        # nome esatto della scheda confermata come keyword
+        self.assertNotIn("place_id", captured["task"])
+        self.assertIn("Acme", captured["task"]["keyword"])
 
 
 if __name__ == "__main__":
@@ -209,3 +212,49 @@ class SerpMatchersTest(unittest.TestCase):
         self.assertEqual(captured["task"]["url_path"],
                          "Restaurant_Review-g1-d2-Reviews-x.html")
         self.assertNotIn("keyword", captured["task"])
+
+
+class GoogleKeywordTest(unittest.TestCase):
+    """La keyword DataForSEO usa il nome ESATTO della scheda confermata."""
+
+    def _post_capture(self, biz):
+        import os as _os
+        import httpx
+        from ekko.connectors import dataforseo as dfs
+        cap = {}
+
+        class FR:
+            def raise_for_status(self): pass
+            def json(self): return {"tasks": [{"id": "t", "status_code": 20100}]}
+
+        orig = httpx.post
+        httpx.post = lambda url, headers=None, json=None, timeout=None: (
+            cap.update(task=json[0]) or FR())
+        _os.environ["DATAFORSEO_AUTH"] = "x"
+        try:
+            dfs.post_task(biz)
+        finally:
+            httpx.post = orig
+            _os.environ.pop("DATAFORSEO_AUTH", None)
+        return cap["task"]
+
+    def test_uses_match_name_with_city(self):
+        from ekko.core.models import BusinessRef
+        t = self._post_capture(BusinessRef(
+            id="b", name="Pasquarelli Auto", city="San Giovanni Teatino",
+            google_match_name="Pasquarelli Auto - Concessionaria Volkswagen"))
+        self.assertIn("Volkswagen", t["keyword"])
+        self.assertIn("San Giovanni Teatino", t["keyword"])
+        self.assertEqual(t["location_name"], "Italy")
+
+    def test_city_not_duplicated(self):
+        from ekko.core.models import BusinessRef
+        t = self._post_capture(BusinessRef(
+            id="b", name="X", city="Milano",
+            google_match_name="Bar Sport Milano"))
+        self.assertEqual(t["keyword"].lower().count("milano"), 1)
+
+    def test_falls_back_to_plain_name(self):
+        from ekko.core.models import BusinessRef
+        t = self._post_capture(BusinessRef(id="b", name="Eataly", city="Roma"))
+        self.assertEqual(t["keyword"], "Eataly Roma")

@@ -76,6 +76,59 @@ def run_tptest(domain: str) -> None:
         print("\n✗ Nessuna recensione estratta. Vedi 'hint'/'error' qui sopra.")
 
 
+def run_dfstest(keyword: str) -> None:
+    """Diagnostica DataForSEO: posta un task Google Reviews e mostra la
+    risposta esatta (status_code/status_message) + il risultato al polling.
+      python -m ekko.cli dfstest "Pasquarelli Auto Volkswagen San Giovanni Teatino"
+    """
+    import json as _json
+    import os
+    import time
+    import httpx
+    auth = os.environ.get("DATAFORSEO_AUTH")
+    if not auth:
+        print("✗ DATAFORSEO_AUTH non impostata (esegui con: bash run.sh)")
+        return
+    base = "https://api.dataforseo.com/v3/business_data/google/reviews"
+    hdr = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
+    task = {"keyword": keyword, "location_name": "Italy",
+            "language_code": "it", "depth": 20, "priority": 2}
+    print(f"→ task_post: {_json.dumps(task, ensure_ascii=False)}\n")
+    r = httpx.post(f"{base}/task_post", headers=hdr, json=[task], timeout=30)
+    body = r.json()
+    t = (body.get("tasks") or [{}])[0]
+    print(f"HTTP {r.status_code} · task status: {t.get('status_code')} "
+          f"{t.get('status_message')}")
+    tid = t.get("id")
+    if not tid or t.get("status_code") not in (20000, 20100):
+        print("✗ Task rifiutato: vedi il messaggio qui sopra.")
+        return
+    print(f"task_id={tid}\nAttendo il risultato (max ~4 min)…")
+    for i in range(24):
+        time.sleep(10)
+        g = httpx.get(f"{base}/task_get/{tid}", headers=hdr, timeout=30).json()
+        gt = (g.get("tasks") or [{}])[0]
+        sc = gt.get("status_code")
+        if sc == 20000 and gt.get("result"):
+            res = gt["result"][0] or {}
+            items = res.get("items") or []
+            print(f"\n✓ PRONTO dopo ~{(i+1)*10}s")
+            print(f"  scheda trovata : {res.get('title')}")
+            print(f"  indirizzo      : {res.get('address')}")
+            print(f"  rating         : {(res.get('rating') or {}).get('value')}")
+            print(f"  recensioni tot : {res.get('reviews_count')}")
+            print(f"  recensioni scaricate: {len(items)}")
+            if items:
+                it = items[0]
+                print(f"  esempio        : {(it.get('review_text') or '')[:80]}")
+            return
+        if sc not in (20100, 40601, 40602):
+            print(f"\n✗ Errore terminale: {sc} {gt.get('status_message')}")
+            return
+        print(f"  …in coda ({(i+1)*10}s)")
+    print("\n✗ Timeout: task ancora in coda dopo 4 minuti.")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "demo"
     if cmd == "ingest":
@@ -84,5 +137,7 @@ if __name__ == "__main__":
         run_as24test(" ".join(sys.argv[2:]) or "autosport-snc")
     elif cmd == "tptest":
         run_tptest(sys.argv[2] if len(sys.argv) > 2 else "unieuro.it")
+    elif cmd == "dfstest":
+        run_dfstest(" ".join(sys.argv[2:]) or "Eataly Milano")
     else:
         run_demo()

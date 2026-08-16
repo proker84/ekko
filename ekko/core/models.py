@@ -58,6 +58,9 @@ class BusinessRef(BaseModel):
     dfs_task_id: Optional[str] = None
     dfs_pending: bool = False
     review_depth: Optional[int] = None
+    # nome ESATTO della scheda Google confermata (keyword precisa per DataForSEO)
+    google_match_name: Optional[str] = None
+    dfs_retried: bool = False        # un solo tentativo di recupero automatico
     # TripAdvisor via DataForSEO (task asincrono separato da Google)
     ta_task_id: Optional[str] = None
     ta_pending: bool = False

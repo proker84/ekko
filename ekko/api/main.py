@@ -263,13 +263,13 @@ def _match_google(name: str, city: str | None) -> list[dict]:
                          "places.id,places.displayName,places.formattedAddress,"
                          "places.userRatingCount"},
             json={"textQuery": f"{name} {city or ''}".strip(),
-                  "languageCode": "it", "maxResultCount": 5},
-            timeout=10)
+                  "languageCode": "it", "maxResultCount": 20},
+            timeout=12)
         resp.raise_for_status()
     except _hx.HTTPError:
         return []
     out = []
-    for p in resp.json().get("places", [])[:5]:
+    for p in resp.json().get("places", [])[:20]:
         label = (p.get("displayName") or {}).get("text") or "?"
         detail = p.get("formattedAddress") or ""
         nrev = p.get("userRatingCount")
@@ -349,7 +349,7 @@ def _match_tripadvisor(name: str, city: str | None) -> list[dict]:
     from urllib.parse import urlparse
     q = f"site:tripadvisor.it {name} {city or ''}".strip()
     out = []
-    for hit in _serp_urls(q):
+    for hit in _serp_urls(q, limit=12):
         path = urlparse(hit["url"]).path.lstrip("/")
         # solo pagine-scheda (Review) — esclude liste/categorie
         if "_Review-" not in path:
@@ -358,7 +358,7 @@ def _match_tripadvisor(name: str, city: str | None) -> list[dict]:
         out.append({"token": path, "label": label, "detail": hit["url"],
                     "conf": matching.confidence(name, label, city,
                                                 hit["title"] + " " + hit["url"])})
-    return sorted(out, key=lambda c: -c["conf"])[:5]
+    return sorted(out, key=lambda c: -c["conf"])[:10]
 
 
 def _match_trustpilot(name: str, domain: str | None, city: str | None) -> list[dict]:
@@ -373,7 +373,7 @@ def _match_trustpilot(name: str, domain: str | None, city: str | None) -> list[d
                  "detail": f"trustpilot.com/review/{domain}", "conf": conf}]
     # nessun dominio: lo trova la SERP
     out = []
-    for hit in _serp_urls(f"site:trustpilot.com {name}"):
+    for hit in _serp_urls(f"site:trustpilot.com {name}", limit=12):
         m = re.search(r"/review/([a-z0-9.\-]+)", hit["url"])
         if not m:
             continue
@@ -383,7 +383,7 @@ def _match_trustpilot(name: str, domain: str | None, city: str | None) -> list[d
                     "detail": f"trustpilot.com/review/{dom}",
                     "conf": matching.confidence(name, label, city,
                                                 hit["title"] + " " + hit["url"])})
-    return sorted(out, key=lambda c: -c["conf"])[:5]
+    return sorted(out, key=lambda c: -c["conf"])[:10]
 
 
 def _match_autoscout24(name: str, url: str | None, city: str | None) -> list[dict]:
@@ -400,7 +400,7 @@ def _match_autoscout24(name: str, url: str | None, city: str | None) -> list[dic
         out.append({"token": guess, "label": title, "detail": guess,
                     "conf": matching.confidence(name, title, city)})
     # 2) ricerca SERP autonoma sulle pagine concessionario
-    for hit in _serp_urls(f"site:autoscout24.it/concessionari {name} {city or ''}".strip()):
+    for hit in _serp_urls(f"site:autoscout24.it/concessionari {name} {city or ''}".strip(), limit=12):
         m = re.search(r"autoscout24\.it/concessionari/([a-z0-9\-]+)", hit["url"])
         if not m:
             continue
@@ -411,7 +411,7 @@ def _match_autoscout24(name: str, url: str | None, city: str | None) -> list[dic
         out.append({"token": u, "label": label, "detail": u,
                     "conf": matching.confidence(name, label, city,
                                                 hit["title"] + " " + hit["url"])})
-    return sorted(out, key=lambda c: -c["conf"])[:5]
+    return sorted(out, key=lambda c: -c["conf"])[:10]
 
 
 def _match_certified(name: str, domain: str | None, which: str) -> list[dict]:
@@ -448,7 +448,9 @@ def match():
     def pack(key, label, cands, none_hint=None, keyword_mode=False):
         auto = bool(cands) and cands[0]["conf"] >= AUTO_THRESHOLD and \
             (len(cands) == 1 or cands[0]["conf"] - cands[1]["conf"] >= 10)
-        return {"key": key, "label": label, "candidates": cands[:5],
+        # fino a 10 candidati: le catene (concessionarie multi-marca) hanno
+        # molte sedi con lo stesso nome — la scelta giusta può non essere top-3
+        return {"key": key, "label": label, "candidates": cands[:10],
                 "auto": auto, "none_hint": none_hint,
                 "keyword_mode": keyword_mode}
 
@@ -501,6 +503,7 @@ def search():
         autoscout24_url=(request.form.get("autoscout24_url") or "").strip() or None,
         # identità confermate nello step di identificazione (se presenti)
         google_place_id=(request.form.get("google_place_id") or "").strip() or None,
+        google_match_name=(request.form.get("google_label") or "").strip() or None,
         tripadvisor_url_path=(request.form.get("tripadvisor_url_path") or "").strip() or None,
         skipped_sources=sorted(skips),
     )
@@ -612,6 +615,16 @@ def _collect_dfs_if_ready(business_id: str) -> dict:
                 setattr(biz, pend_key, False)
                 if total:
                     setattr(biz, total_attr, int(total))
+                # AUTO-RECUPERO: task andato a vuoto (0 recensioni) -> un solo
+                # nuovo tentativo con il nome "grezzo", senza qualificatori.
+                if (mod is _dfs and run.fetched == 0 and not biz.dfs_retried
+                        and biz.google_match_name):
+                    biz.dfs_retried = True
+                    biz.google_match_name = None      # torna al nome cercato
+                    new_tid = _dfs.post_task(biz)
+                    if new_tid:
+                        biz.dfs_task_id = new_tid
+                        biz.dfs_pending = True
                 db.upsert_business(biz)
                 payload = db.get_business_payload(business_id) or payload
     return payload

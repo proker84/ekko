@@ -111,6 +111,17 @@
     color:#fff; border:none; border-radius:12px; padding:14px; font-size:1rem;
     font-weight:650; cursor:pointer; }
   .go-big:disabled { opacity:.45; cursor:default; }
+  .refine { border-top:1px solid rgba(130,155,255,.18); margin-top:14px;
+    padding-top:12px; text-align:left; }
+  .refine label { font-size:.76rem; color:#8290c5; display:block; margin-bottom:6px; }
+  .refine-row { display:flex; gap:8px; }
+  .refine-row input { flex:1; background:rgba(10,18,64,.6); color:#fff;
+    border:1px solid rgba(130,155,255,.22); border-radius:9px;
+    padding:9px 11px; font-size:.85rem; }
+  .refine-row button { background:rgba(77,130,243,.18); color:#9fc0ff;
+    border:1px solid rgba(130,155,255,.28); border-radius:9px;
+    padding:9px 14px; font-size:.82rem; cursor:pointer; white-space:nowrap; }
+  .refine-row button:hover { background:rgba(77,130,243,.30); }
   .mspin { text-align:center; color:#b9c3e6; padding:24px 0; }
   .mspin .sp { width:16px; height:16px; border:2px solid #4d82f355;
     border-top-color:#4d82f3; border-radius:50%; display:inline-block;
@@ -184,6 +195,13 @@
         Sopra il <b id="thLbl">90%</b> confermiamo noi; sotto, scegli tu.</p>
       <div class="mspin" id="mSpin"><span class="sp"></span>Ricerca dell'azienda sulle piattaforme…</div>
       <div id="mList"></div>
+      <div class="refine" id="refineBox">
+        <label for="mRefine">Non c'è quella giusta? Precisa il nome (es. aggiungi il marchio o la via) e ricerco:</label>
+        <div class="refine-row">
+          <input id="mRefine" type="text" placeholder="es. Pasquarelli Auto Stellantis Via Po 88">
+          <button type="button" id="mRefineGo">🔍 Ricerca</button>
+        </div>
+      </div>
       <button class="go-big" id="mGo" type="button" disabled>▶ Avvia analisi</button>
     </div>
     <!-- Fase 2: raccolta con progress bar -->
@@ -388,9 +406,22 @@ function renderMatch(j){
         ? "✓ Pre-selezionata la migliore ("+top.conf+"%). Conferma o cambia, poi dai l'OK in fondo."
         : "Accuratezza sotto il "+(j.threshold||90)+"%: scegli tu il profilo giusto.";
       body.appendChild(n);
-      src.candidates.slice(0,3).forEach((cd2,i)=>body.appendChild(
+      /* primi 3 subito; gli altri dietro "mostra altri" (catene multi-sede) */
+      const firstN = src.candidates.slice(0,3), restN = src.candidates.slice(3);
+      firstN.forEach((cd2,i)=>body.appendChild(
         mkCand(cd2.token, `${cd2.label} · ${cd2.conf}%`, cd2.detail,
                src.auto && i===0)));
+      if(restN.length){
+        const more=document.createElement("button"); more.type="button";
+        more.className="mchg"; more.textContent=`▾ mostra altri ${restN.length} risultati`;
+        more.addEventListener("click",()=>{
+          more.remove();
+          restN.forEach(cd2=>body.insertBefore(
+            mkCand(cd2.token, `${cd2.label} · ${cd2.conf}%`, cd2.detail, false),
+            body.querySelector(".cand.skip")));
+        });
+        body.appendChild(more);
+      }
       body.appendChild(mkSkip(false));
       msel[src.key] = src.auto
         ? {resolved:true, token:top.token}        /* pre-scelta, OK col bottone */
@@ -415,7 +446,13 @@ function startSearch(){
     const m=msel[s.key]; if(!m) return;
     if(m.token==="__skip__"){ skips.push(s.key); return; }
     if(m.token==="__keyword__"||m.token==null) return;
-    if(s.key==="google") fd.set("google_place_id", m.token);
+    if(s.key==="google"){
+      fd.set("google_place_id", m.token);
+      /* nome ESATTO della scheda scelta: è la chiave con cui DataForSEO
+         trova la sede giusta (il place_id di Places non gli è compatibile) */
+      const chosen=(s.candidates||[]).find(c=>String(c.token)===String(m.token));
+      if(chosen) fd.set("google_label", chosen.label);
+    }
     else if(s.key==="tripadvisor") fd.set("tripadvisor_url_path", m.token);
     else if(s.key==="autoscout24") fd.set("autoscout24_url", m.token);
     else if(["trustpilot","feedaty","recensioni_verificate"].includes(s.key))
@@ -444,13 +481,8 @@ function startSearch(){
 }
 document.getElementById("mGo").addEventListener("click", startSearch);
 
-document.getElementById("f").addEventListener("submit", async (e)=>{
-  e.preventDefault();
-  const form=e.target;
-  const name=(document.getElementById("name").value||"").trim();
-  if(!name) return;
-  document.getElementById("go").disabled=true;
-  /* mostra l'overlay in fase identificazione */
+async function runMatch(name){
+  const form=document.getElementById("f");
   document.getElementById("collectPanel").classList.add("hidden");
   document.getElementById("matchPanel").classList.remove("hidden");
   document.getElementById("mTitle").textContent=`Identificazione di “${name}”`;
@@ -459,18 +491,40 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
   document.getElementById("mGo").disabled=true;
   document.getElementById("collect").classList.remove("hidden");
   document.body.style.overflow="hidden";
+  const fd=new FormData(form);
+  fd.set("name", name);                       /* usa il nome affinato */
   try{
-    const r=await fetch("/match",{ method:"POST", body:new FormData(form),
+    const r=await fetch("/match",{ method:"POST", body:fd,
       headers:{ "X-Requested-With":"fetch" }});
     if(!r.ok) throw new Error("http "+r.status);
     const j=await r.json();
     if(!j.ok) throw new Error("no match");
     renderMatch(j);
+    document.getElementById("mRefine").value=name;
+    return true;
   }catch(_){
-    /* match non disponibile -> vai diretto alla raccolta come prima */
     matchData=null;
     startSearchDirect(form,name);
+    return false;
   }
+}
+
+document.getElementById("mRefineGo").addEventListener("click",()=>{
+  const v=(document.getElementById("mRefine").value||"").trim();
+  if(!v) return;
+  document.getElementById("name").value=v;   /* l'analisi userà questo nome */
+  runMatch(v);
+});
+document.getElementById("mRefine").addEventListener("keydown",e=>{
+  if(e.key==="Enter"){ e.preventDefault(); document.getElementById("mRefineGo").click(); }
+});
+
+document.getElementById("f").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const name=(document.getElementById("name").value||"").trim();
+  if(!name) return;
+  document.getElementById("go").disabled=true;
+  runMatch(name);
 });
 
 function startSearchDirect(form,name){

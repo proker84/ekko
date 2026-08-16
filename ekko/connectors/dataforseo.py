@@ -159,14 +159,16 @@ def post_task(business: BusinessRef) -> str | None:
     if not os.environ.get("DATAFORSEO_AUTH"):
         return None
     depth = business.review_depth or DEPTH
-    task = {"language_code": "it", "depth": depth, "priority": 2}
-    if business.google_place_id:
-        # place_id CONFERMATO dall'utente nello step di identificazione:
-        # match esatto, niente ambiguità della ricerca per keyword.
-        task["place_id"] = business.google_place_id
-    else:
-        task["keyword"] = f"{business.name} {business.city or ''}".strip()
-        task["location_name"] = "Italy"
+    # NB: NON si passa google_place_id a DataForSEO — il loro `place_id` usa il
+    # namespace Google Maps ("GhIJ…"), diverso da quello della Places API
+    # ("ChIJ…") che risolviamo noi: il task fallirebbe restituendo 0 recensioni.
+    # Si usa invece il NOME ESATTO della scheda confermata nello step di
+    # identificazione (google_match_name), che è già disambiguato.
+    keyword = (business.google_match_name or business.name).strip()
+    if business.city and business.city.lower() not in keyword.lower():
+        keyword = f"{keyword} {business.city}".strip()
+    task = {"language_code": "it", "depth": depth, "priority": 2,
+            "keyword": keyword[:700], "location_name": "Italy"}
     try:
         r = httpx.post(f"{BASE}/task_post", headers=_auth_header(),
                        json=[task], timeout=30)
@@ -174,9 +176,20 @@ def post_task(business: BusinessRef) -> str | None:
         tasks = r.json().get("tasks") or []
         if tasks and tasks[0].get("status_code") in (20000, 20100):
             return tasks[0]["id"]
+        _log_task_error(tasks, keyword)
     except httpx.HTTPError:
         pass
     return None
+
+
+def _log_task_error(tasks: list, keyword: str) -> None:
+    """Traccia il motivo del rifiuto (visibile nei log Render / terminale)."""
+    try:
+        t = (tasks or [{}])[0]
+        print(f"[ekko][dataforseo] task rifiutato per '{keyword}': "
+              f"{t.get('status_code')} {t.get('status_message')}", flush=True)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # Stati "in lavorazione" DataForSEO: tutto il resto è terminale.
