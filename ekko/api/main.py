@@ -19,6 +19,7 @@ import functools
 import hashlib
 import hmac
 import os
+import re
 import secrets
 from collections import Counter
 from dataclasses import asdict
@@ -243,6 +244,159 @@ def home():
     )
 
 
+# --------------------------------------------------------------------------
+# Step di identificazione: candidati per fonte con % di accuratezza.
+# Ogni _match_* ritorna [{token,label,detail,conf}] (token = ciò che serve
+# alla fonte: place_id, dominio, URL). Funzioni separate = testabili/stubbabili.
+# --------------------------------------------------------------------------
+def _match_google(name: str, city: str | None) -> list[dict]:
+    import httpx as _hx
+    from ekko.core import matching
+    key = os.environ.get("GOOGLE_MAPS_API_KEY")
+    if not key:
+        return []
+    try:
+        resp = _hx.post(
+            "https://places.googleapis.com/v1/places:searchText",
+            headers={"X-Goog-Api-Key": key,
+                     "X-Goog-FieldMask":
+                         "places.id,places.displayName,places.formattedAddress,"
+                         "places.userRatingCount"},
+            json={"textQuery": f"{name} {city or ''}".strip(),
+                  "languageCode": "it", "maxResultCount": 5},
+            timeout=10)
+        resp.raise_for_status()
+    except _hx.HTTPError:
+        return []
+    out = []
+    for p in resp.json().get("places", [])[:5]:
+        label = (p.get("displayName") or {}).get("text") or "?"
+        detail = p.get("formattedAddress") or ""
+        nrev = p.get("userRatingCount")
+        if nrev:
+            detail += f" · {nrev} recensioni"
+        out.append({"token": p.get("id"), "label": label, "detail": detail,
+                    "conf": matching.confidence(name, label, city, detail)})
+    return sorted(out, key=lambda c: -c["conf"])
+
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+def _page_title(url: str) -> str | None:
+    """Titolo della pagina (None = pagina inesistente/irraggiungibile)."""
+    import httpx as _hx
+    from ekko.connectors.pubscrape import UA
+    try:
+        r = _hx.get(url, headers={"User-Agent": UA, "Accept-Language": "it"},
+                    timeout=8, follow_redirects=True)
+        if r.status_code != 200:
+            return None
+        m = _TITLE_RE.search(r.text)
+        if not m:
+            return ""
+        return re.split(r"\s*[|·–-]\s*", m.group(1).strip())[0]
+    except _hx.HTTPError:
+        return None
+
+
+def _match_trustpilot(name: str, domain: str | None, city: str | None) -> list[dict]:
+    from ekko.core import matching
+    if not domain:
+        return []
+    title = _page_title(f"https://it.trustpilot.com/review/{domain}")
+    if title is None:
+        return []
+    conf = matching.confidence(name, title or domain, city) if title else 75
+    # il dominio l'ha fornito l'utente: alziamo il pavimento
+    conf = max(conf, 80)
+    return [{"token": domain, "label": title or domain,
+             "detail": f"trustpilot.com/review/{domain}", "conf": conf}]
+
+
+def _match_autoscout24(name: str, url: str | None, city: str | None) -> list[dict]:
+    from ekko.connectors.autoscout24 import BASE, _slug
+    from ekko.core import matching
+    if url:
+        return [{"token": url, "label": "Pagina indicata da te",
+                 "detail": url, "conf": 100}]
+    guess = f"{BASE}/{_slug(name)}"
+    title = _page_title(guess + "/recensioni")
+    if title is None:
+        return []
+    return [{"token": guess, "label": title or name, "detail": guess,
+             "conf": matching.confidence(name, title or name, city)}]
+
+
+def _match_certified(name: str, domain: str | None, which: str) -> list[dict]:
+    from ekko.core import matching
+    if not domain:
+        return []
+    if which == "feedaty":
+        site = domain.split(".")[0]
+        url = f"https://www.feedaty.com/feedaty/reviews/{site}"
+    else:
+        url = f"https://www.recensioni-verificate.com/recensioni-clienti/{domain}.html"
+    title = _page_title(url)
+    if title is None:
+        return []
+    return [{"token": domain, "label": title or domain, "detail": url,
+             "conf": max(matching.confidence(name, title or domain), 80)}]
+
+
+@app.post("/match")
+@login_required
+def match():
+    """Identificazione azienda: candidati e confidenza per ogni fonte attiva."""
+    from ekko.connectors import (autoscout24 as _as24, certified as _cert,
+                                 dataforseo as _dfs, facebook as _fb,
+                                 tripadvisor_dfs as _ta)
+    from ekko.core.matching import AUTO_THRESHOLD
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        return jsonify(ok=False, reason="no_name")
+    city = (request.form.get("city") or "").strip() or None
+    domain = (request.form.get("domain") or "").strip() or None
+    as24_url = (request.form.get("autoscout24_url") or "").strip() or None
+
+    def pack(key, label, cands, none_hint=None, keyword_mode=False):
+        auto = bool(cands) and cands[0]["conf"] >= AUTO_THRESHOLD and \
+            (len(cands) == 1 or cands[0]["conf"] - cands[1]["conf"] >= 10)
+        return {"key": key, "label": label, "candidates": cands[:5],
+                "auto": auto, "none_hint": none_hint,
+                "keyword_mode": keyword_mode}
+
+    sources = []
+    if _dfs.enabled() or os.environ.get("GOOGLE_MAPS_API_KEY"):
+        sources.append(pack("google", "Google", _match_google(name, city),
+                            none_hint="Nessun risultato: precisa nome o città"))
+    if _ta.enabled():
+        # TripAdvisor (DataForSEO) non ha una ricerca istantanea: si usa il nome
+        sources.append(pack("tripadvisor", "TripAdvisor", [],
+                            keyword_mode=True))
+    if os.environ.get("TRUSTPILOT_API_KEY") or trustpilot_public.enabled():
+        sources.append(pack("trustpilot", "Trustpilot",
+                            _match_trustpilot(name, domain, city),
+                            none_hint="Inserisci il dominio (es. azienda.it)"))
+    if _as24.enabled():
+        sources.append(pack("autoscout24", "AutoScout24",
+                            _match_autoscout24(name, as24_url, city),
+                            none_hint="Incolla l'URL della pagina concessionario"))
+    if _cert.feedaty_enabled():
+        sources.append(pack("feedaty", "Feedaty",
+                            _match_certified(name, domain, "feedaty"),
+                            none_hint="Serve il dominio; pagina certificato non trovata"))
+    if _cert.rv_enabled():
+        sources.append(pack("recensioni_verificate", "Recensioni Verificate",
+                            _match_certified(name, domain, "rv"),
+                            none_hint="Serve il dominio; pagina certificato non trovata"))
+    if _fb.enabled():
+        sources.append(pack("meta", "Facebook",
+                            [{"token": "own", "label": "Pagina collegata (token)",
+                              "detail": "", "conf": 100}]))
+    return jsonify(ok=True, threshold=AUTO_THRESHOLD, sources=sources)
+
+
 @app.post("/search")
 @login_required
 def search():
@@ -250,12 +404,17 @@ def search():
     name = (request.form.get("name") or "").strip()
     if not name:
         return redirect("/")
+    skips = {s.strip() for s in (request.form.get("skip_sources") or "").split(",")
+             if s.strip()}
     business = BusinessRef(
         id=f"{owner}-{_slugify(name)}",  # namespace per-agenzia -> isolamento dati
         name=name,
         city=(request.form.get("city") or "").strip() or None,
         domain=(request.form.get("domain") or "").strip() or None,
         autoscout24_url=(request.form.get("autoscout24_url") or "").strip() or None,
+        # identità confermate nello step di identificazione (se presenti)
+        google_place_id=(request.form.get("google_place_id") or "").strip() or None,
+        skipped_sources=sorted(skips),
     )
     try:
         _d = int(request.form.get("depth") or 0)
@@ -267,21 +426,22 @@ def search():
     from ekko.connectors import dataforseo as _dfs
     from ekko.connectors import tripadvisor_dfs as _ta
     # 1) task asincroni DataForSEO (Google + TripAdvisor): partono in background
-    if _dfs.enabled():
+    if _dfs.enabled() and "google" not in skips:
         tid = _dfs.post_task(business)
         if tid:
             business.dfs_task_id = tid
             business.dfs_pending = True
-    if _ta.enabled():
+    if _ta.enabled() and "tripadvisor" not in skips:
         ta_tid = _ta.post_task(business)
         if ta_tid:
             business.ta_task_id = ta_tid
             business.ta_pending = True
     if business.dfs_pending or business.ta_pending:
         save_business(business)
-    # 2) fonti veloci subito (Trustpilot pubblico / Google API), NON DataForSEO
+    # 2) fonti veloci subito (scraper/API), escluse quelle saltate dall'utente
     fast = [c for c in default_connectors()
-            if type(c).__name__ != "DataForSeoGoogleConnector"]
+            if type(c).__name__ != "DataForSeoGoogleConnector"
+            and c.source_name not in skips]
     if fast:
         ingest(business, fast)
     # richiesta via fetch dalla home -> JSON per l'overlay con le progress bar
@@ -354,7 +514,8 @@ def _collect_dfs_if_ready(business_id: str) -> dict:
             ("dfs_pending", "dfs_task_id", _dfs, "total_reviews_google"),
             ("ta_pending", "ta_task_id", _ta, "total_reviews_tripadvisor")):
         if payload.get(pend_key) and payload.get(task_key):
-            items, total = mod.collect(payload[task_key])
+            items, total = mod.collect(payload[task_key],
+                                       expect_name=payload.get("name"))
             if items is not None:  # task pronto -> ingerisci
                 biz = BusinessRef.model_validate(payload)
                 run = ConnectorRun()
@@ -374,6 +535,7 @@ def _source_states(business_id: str, payload: dict | None = None) -> list[dict]:
                                  facebook, tripadvisor_dfs as _ta)
     payload = payload if payload is not None else (db.get_business_payload(business_id) or {})
     counts = db.count_by_source(business_id)
+    skips = set(payload.get("skipped_sources") or [])
     out = []
     if _dfs.enabled():
         out.append({"key": "google", "label": "Google",
@@ -404,7 +566,7 @@ def _source_states(business_id: str, payload: dict | None = None) -> list[dict]:
     if facebook.enabled():
         out.append({"key": "meta", "label": "Facebook", "state": "done",
                     "count": counts.get("meta", 0), "total": None})
-    return out
+    return [s for s in out if s["key"] not in skips]
 
 
 @app.get("/businesses/<business_id>/progress")

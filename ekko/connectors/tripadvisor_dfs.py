@@ -52,20 +52,37 @@ def post_task(business: BusinessRef) -> str | None:
     return None
 
 
-def collect(task_id: str):
-    """Ritorna (items, total) se pronto, altrimenti (None, None)."""
+IN_PROGRESS_CODES = {20100, 40601, 40602}   # created / handed / in queue
+
+
+def collect(task_id: str, expect_name: str | None = None):
+    """(items, total) se pronto; (None, None) se in coda; ([], None) se in
+    errore terminale. Con expect_name valida che l'attività trovata sia
+    DAVVERO quella cercata: la ricerca per keyword su TripAdvisor può
+    agganciare un omonimo (es. un ristorante invece del concessionario) —
+    in quel caso i risultati vengono SCARTATI (meglio zero che sporchi)."""
     if not (task_id and os.environ.get("DATAFORSEO_AUTH")):
-        return None, None
+        return [], None
     try:
         g = httpx.get(f"{BASE}/task_get/{task_id}", headers=_auth_header(), timeout=30)
         g.raise_for_status()
         t = (g.json().get("tasks") or [])
-        if t and t[0].get("status_code") == 20000 and t[0].get("result"):
-            res = t[0]["result"][0]
+        if not t:
+            return None, None
+        sc = t[0].get("status_code")
+        if sc == 20000 and t[0].get("result"):
+            res = t[0]["result"][0] or {}
+            title = res.get("title") or ""
+            if expect_name and title:
+                from ekko.core.matching import confidence
+                if confidence(expect_name, title) < 50:
+                    return [], None   # attività sbagliata: scarta tutto
             return (res.get("items") or []), res.get("reviews_count")
+        if sc in IN_PROGRESS_CODES:
+            return None, None
+        return [], None
     except httpx.HTTPError:
-        pass
-    return None, None
+        return None, None
 
 
 def _parse_ts(item: dict) -> datetime | None:

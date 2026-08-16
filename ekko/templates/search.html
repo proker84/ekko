@@ -57,6 +57,7 @@
   .collect { position:fixed; inset:0; z-index:50; background:#0a1240;
     display:flex; align-items:center; justify-content:center; }
   .collect.hidden { display:none; }
+  .hidden { display:none !important; }
   .collect .mock { position:absolute; inset:0; filter:blur(7px) brightness(.7);
     opacity:.38; padding:36px; display:grid; gap:16px; align-content:start;
     grid-template-columns:repeat(6,1fr); pointer-events:none; }
@@ -83,6 +84,37 @@
   .pb.off .pl { color:#5f6b9e; }
   .pb.off .pl .st { color:#5f6b9e; font-style:italic; }
   .chint { color:#8290c5; font-size:.73rem; text-align:center; margin-top:18px; }
+  /* ---------- pannello identificazione (match) ---------- */
+  .panel.wide { width:min(680px,94vw); max-height:88vh; overflow:auto; }
+  .msrc { border:1px solid rgba(130,155,255,.18); border-radius:12px;
+    padding:12px 14px; margin:10px 0; text-align:left; }
+  .msrc .mh { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .msrc .mh b { font-size:.9rem; }
+  .conf { border-radius:20px; padding:2px 10px; font-size:.72rem; font-weight:700;
+    font-variant-numeric:tabular-nums; }
+  .conf.hi  { background:rgba(14,168,138,.18); color:#2ec9ab; }
+  .conf.mid { background:rgba(250,178,25,.16); color:#fab219; }
+  .conf.lo  { background:rgba(229,72,77,.16);  color:#ff7d81; }
+  .cand { display:flex; gap:10px; align-items:flex-start; padding:8px 10px;
+    border:1px solid transparent; border-radius:10px; cursor:pointer; margin-top:6px; }
+  .cand:hover { background:rgba(77,130,243,.10); }
+  .cand.sel { border-color:#4d82f3; background:rgba(77,130,243,.14); }
+  .cand input { margin-top:3px; accent-color:#4d82f3; }
+  .cand .cl { font-size:.86rem; }
+  .cand .cd { font-size:.74rem; color:#8290c5; margin-top:2px; }
+  .cand.skip .cl { color:#8290c5; font-style:italic; }
+  .mnote { font-size:.76rem; color:#8290c5; margin-top:6px; }
+  .mok { font-size:.8rem; color:#2ec9ab; }
+  .mchg { background:none; border:none; color:#4d82f3; cursor:pointer;
+    font-size:.76rem; padding:2px 4px; }
+  .go-big { width:100%; margin-top:16px; background:linear-gradient(135deg,#3b63f0,#2746c8);
+    color:#fff; border:none; border-radius:12px; padding:14px; font-size:1rem;
+    font-weight:650; cursor:pointer; }
+  .go-big:disabled { opacity:.45; cursor:default; }
+  .mspin { text-align:center; color:#b9c3e6; padding:24px 0; }
+  .mspin .sp { width:16px; height:16px; border:2px solid #4d82f355;
+    border-top-color:#4d82f3; border-radius:50%; display:inline-block;
+    vertical-align:-3px; margin-right:9px; animation:spin .7s linear infinite; }
   .userbar { position:fixed; top:14px; right:16px; display:flex; align-items:center;
     gap:10px; font-size:.82rem; color:light-dark(#52514e,#c3c2b7); }
   .userbar .who { max-width:220px; overflow:hidden; text-overflow:ellipsis;
@@ -144,7 +176,18 @@
       <div class="m h3 c3"></div><div class="m h3 c3"></div>
       <div class="m h2 c6"></div>
     </div>
-    <div class="panel">
+    <!-- Fase 1: identificazione azienda con % di accuratezza per fonte -->
+    <div class="panel wide" id="matchPanel">
+      <div class="plogo">ekko<span>.</span></div>
+      <h2 id="mTitle">Identificazione azienda</h2>
+      <p class="csub">Per ogni fonte verifichiamo di aver trovato <b>l'azienda giusta</b>.<br>
+        Sopra il <b id="thLbl">90%</b> confermiamo noi; sotto, scegli tu.</p>
+      <div class="mspin" id="mSpin"><span class="sp"></span>Ricerca dell'azienda sulle piattaforme…</div>
+      <div id="mList"></div>
+      <button class="go-big" id="mGo" type="button" disabled>▶ Avvia analisi</button>
+    </div>
+    <!-- Fase 2: raccolta con progress bar -->
+    <div class="panel hidden" id="collectPanel">
       <div class="plogo">ekko<span>.</span></div>
       <h2 id="cTitle">Analisi in corso…</h2>
       <p class="csub">Stiamo raccogliendo le recensioni fonte per fonte.<br>
@@ -152,6 +195,9 @@
       <div id="cBars"></div>
       <p class="chint">La raccolta completa di Google richiede in genere 2-4 minuti.
         Puoi lasciare questa pagina aperta: si aggiorna da sola.</p>
+      <p class="chint hidden" id="slowHint">⏱ Sta impiegando più del previsto.
+        <a href="#" id="openAnyway" style="color:#4d82f3">Apri comunque la dashboard</a> —
+        le recensioni mancanti arriveranno lì appena pronte.</p>
     </div>
   </div>
 
@@ -215,11 +261,14 @@ function mkBar(key, label, offline){
   bars[key]={el:d, fill, st, state: offline?"off":"waiting"};
 }
 
-function showCollect(name){
+function showCollect(name, skips){
+  skips = skips || new Set();
+  document.getElementById("matchPanel").classList.add("hidden");
+  document.getElementById("collectPanel").classList.remove("hidden");
   document.getElementById("cTitle").textContent=`Analisi di “${name}” in corso`;
   document.getElementById("cBars").replaceChildren();
   for (const k of Object.keys(bars)) delete bars[k];
-  ALL_SOURCES.forEach(([k,l,on])=>mkBar(k,l,!on));   /* spente = riga grigia "non attiva" */
+  ALL_SOURCES.forEach(([k,l,on])=>{ if(!skips.has(k)) mkBar(k,l,!on); });
   collectStart=Date.now();
   document.getElementById("collect").classList.remove("hidden");
   document.body.style.overflow="hidden";
@@ -261,9 +310,138 @@ async function pollProgress(id){
       setTimeout(()=>{ location.href=j.dashboard_url; }, 900);
       return;
     }
+    /* oltre 5 minuti: offri l'uscita — la dashboard raccoglie da sola */
+    if(Date.now()-collectStart > 5*60000){
+      const h=document.getElementById("slowHint");
+      h.classList.remove("hidden");
+      document.getElementById("openAnyway").onclick=(e)=>{
+        e.preventDefault(); location.href=j.dashboard_url; };
+    }
   }
   setTimeout(()=>pollProgress(id), 6000);
 }
+
+/* ---------- fase 1: identificazione (match con % accuratezza) ---------- */
+const msel = {};   /* key -> {resolved:bool, token:string|null(=salta)} */
+let matchData = null;
+
+function confClass(c){ return c>=90?"hi":(c>=70?"mid":"lo"); }
+
+function renderMatch(j){
+  matchData = j;
+  document.getElementById("thLbl").textContent = (j.threshold||90)+"%";
+  const list=document.getElementById("mList"); list.replaceChildren();
+  for (const k of Object.keys(msel)) delete msel[k];
+  j.sources.forEach(src=>{
+    const box=document.createElement("div"); box.className="msrc";
+    const head=document.createElement("div"); head.className="mh";
+    const nm=document.createElement("b"); nm.textContent=src.label;
+    head.appendChild(nm);
+    const top=src.candidates[0];
+    if(top){ const cb=document.createElement("span");
+      cb.className="conf "+confClass(top.conf);
+      cb.textContent="accuratezza "+top.conf+"%"; head.appendChild(cb); }
+    box.appendChild(head);
+    const body=document.createElement("div");
+    box.appendChild(body);
+    list.appendChild(box);
+
+    const choose=(token)=>{ msel[src.key]={resolved:true, token}; refreshGo();
+      body.querySelectorAll(".cand").forEach(c=>c.classList.toggle("sel",
+        c.dataset.token===String(token))); };
+
+    const mkCand=(token,label,detail,checked)=>{
+      const c=document.createElement("label"); c.className="cand"+(checked?" sel":"");
+      c.dataset.token=String(token);
+      const r=document.createElement("input"); r.type="radio"; r.name="m_"+src.key;
+      r.checked=!!checked;
+      r.addEventListener("change",()=>choose(token));
+      const t=document.createElement("div");
+      const cl=document.createElement("div"); cl.className="cl"; cl.textContent=label;
+      t.appendChild(cl);
+      if(detail){ const cd=document.createElement("div"); cd.className="cd";
+        cd.textContent=detail; t.appendChild(cd); }
+      c.append(r,t); return c; };
+
+    const mkSkip=(checked)=>{
+      const c=mkCand("__skip__","Salta questa fonte",
+        "non verrà usata per questa analisi",checked);
+      c.classList.add("skip"); return c; };
+
+    if(src.keyword_mode){
+      body.appendChild(mkCand("__keyword__",
+        "Ricerca per nome — verifica preventiva non disponibile",
+        "la piattaforma verrà interrogata con nome + città", true));
+      body.appendChild(mkSkip(false));
+      msel[src.key]={resolved:true, token:"__keyword__"};
+    } else if(!src.candidates.length){
+      const n=document.createElement("div"); n.className="mnote";
+      n.textContent="✗ Non trovata. "+(src.none_hint||"");
+      body.appendChild(n);
+      body.appendChild(mkSkip(true));
+      msel[src.key]={resolved:true, token:"__skip__"};
+    } else {
+      /* SEMPRE la lista dei top 3 candidati: anche al 100% serve il tuo OK
+         (il via è il pulsante "Avvia analisi"). Con ≥90% pre-selezioniamo. */
+      const n=document.createElement("div"); n.className="mnote";
+      n.textContent = src.auto
+        ? "✓ Pre-selezionata la migliore ("+top.conf+"%). Conferma o cambia, poi dai l'OK in fondo."
+        : "Accuratezza sotto il "+(j.threshold||90)+"%: scegli tu il profilo giusto.";
+      body.appendChild(n);
+      src.candidates.slice(0,3).forEach((cd2,i)=>body.appendChild(
+        mkCand(cd2.token, `${cd2.label} · ${cd2.conf}%`, cd2.detail,
+               src.auto && i===0)));
+      body.appendChild(mkSkip(false));
+      msel[src.key] = src.auto
+        ? {resolved:true, token:top.token}        /* pre-scelta, OK col bottone */
+        : {resolved:false, token:null};           /* scelta obbligatoria */
+    }
+  });
+  document.getElementById("mSpin").classList.add("hidden");
+  refreshGo();
+}
+
+function refreshGo(){
+  const ok = matchData && matchData.sources.every(s=>msel[s.key] && msel[s.key].resolved);
+  document.getElementById("mGo").disabled = !ok;
+}
+
+function startSearch(){
+  const form=document.getElementById("f");
+  const name=(document.getElementById("name").value||"").trim();
+  const fd=new FormData(form);
+  const skips=[];
+  (matchData?matchData.sources:[]).forEach(s=>{
+    const m=msel[s.key]; if(!m) return;
+    if(m.token==="__skip__"){ skips.push(s.key); return; }
+    if(m.token==="__keyword__"||m.token==null) return;
+    if(s.key==="google") fd.set("google_place_id", m.token);
+    else if(s.key==="autoscout24") fd.set("autoscout24_url", m.token);
+    else if(["trustpilot","feedaty","recensioni_verificate"].includes(s.key))
+      fd.set("domain", m.token);
+  });
+  fd.set("skip_sources", skips.join(","));
+  showCollect(name, new Set(skips));
+  (async ()=>{
+    try{
+      const r=await fetch("/search",{ method:"POST", body:fd,
+        headers:{ "X-Requested-With":"fetch" }});
+      if(!r.ok) throw new Error("http "+r.status);
+      const j=await r.json();
+      if(!j.ok || !j.id) throw new Error("bad payload");
+      applyStates(j.sources||[]);
+      if(j.all_done){ clearInterval(ticker);
+        setTimeout(()=>{ location.href=j.dashboard_url; }, 700); }
+      else pollProgress(j.id);
+    }catch(_){
+      clearInterval(ticker);
+      document.getElementById("collect").classList.add("hidden");
+      document.body.style.overflow="";
+      form.submit();   /* fallback classico */
+    }
+  })();
+}
+document.getElementById("mGo").addEventListener("click", startSearch);
 
 document.getElementById("f").addEventListener("submit", async (e)=>{
   e.preventDefault();
@@ -271,25 +449,50 @@ document.getElementById("f").addEventListener("submit", async (e)=>{
   const name=(document.getElementById("name").value||"").trim();
   if(!name) return;
   document.getElementById("go").disabled=true;
-  showCollect(name);
+  /* mostra l'overlay in fase identificazione */
+  document.getElementById("collectPanel").classList.add("hidden");
+  document.getElementById("matchPanel").classList.remove("hidden");
+  document.getElementById("mTitle").textContent=`Identificazione di “${name}”`;
+  document.getElementById("mSpin").classList.remove("hidden");
+  document.getElementById("mList").replaceChildren();
+  document.getElementById("mGo").disabled=true;
+  document.getElementById("collect").classList.remove("hidden");
+  document.body.style.overflow="hidden";
   try{
-    const r=await fetch("/search",{ method:"POST", body:new FormData(form),
+    const r=await fetch("/match",{ method:"POST", body:new FormData(form),
       headers:{ "X-Requested-With":"fetch" }});
     if(!r.ok) throw new Error("http "+r.status);
     const j=await r.json();
-    if(!j.ok || !j.id) throw new Error("bad payload");
-    applyStates(j.sources||[]);
-    if(j.all_done){ clearInterval(ticker);
-      setTimeout(()=>{ location.href=j.dashboard_url; }, 700); }
-    else pollProgress(j.id);
+    if(!j.ok) throw new Error("no match");
+    renderMatch(j);
   }catch(_){
-    /* fallback senza JS/fetch: submit classico con redirect server-side */
-    clearInterval(ticker);
-    document.getElementById("collect").classList.add("hidden");
-    document.body.style.overflow="";
-    form.submit();
+    /* match non disponibile -> vai diretto alla raccolta come prima */
+    matchData=null;
+    startSearchDirect(form,name);
   }
 });
+
+function startSearchDirect(form,name){
+  showCollect(name, new Set());
+  (async ()=>{
+    try{
+      const r=await fetch("/search",{ method:"POST", body:new FormData(form),
+        headers:{ "X-Requested-With":"fetch" }});
+      if(!r.ok) throw new Error("http "+r.status);
+      const j=await r.json();
+      if(!j.ok || !j.id) throw new Error("bad payload");
+      applyStates(j.sources||[]);
+      if(j.all_done){ clearInterval(ticker);
+        setTimeout(()=>{ location.href=j.dashboard_url; }, 700); }
+      else pollProgress(j.id);
+    }catch(_){
+      clearInterval(ticker);
+      document.getElementById("collect").classList.add("hidden");
+      document.body.style.overflow="";
+      form.submit();
+    }
+  })();
+}
 
 const COST_PER_REVIEW_EUR = 0.00014; // stima DataForSEO (coda priority) per recensione
 function updateCost(){

@@ -159,9 +159,14 @@ def post_task(business: BusinessRef) -> str | None:
     if not os.environ.get("DATAFORSEO_AUTH"):
         return None
     depth = business.review_depth or DEPTH
-    task = {"language_code": "it", "depth": depth, "priority": 2,
-            "keyword": f"{business.name} {business.city or ''}".strip(),
-            "location_name": "Italy"}
+    task = {"language_code": "it", "depth": depth, "priority": 2}
+    if business.google_place_id:
+        # place_id CONFERMATO dall'utente nello step di identificazione:
+        # match esatto, niente ambiguità della ricerca per keyword.
+        task["place_id"] = business.google_place_id
+    else:
+        task["keyword"] = f"{business.name} {business.city or ''}".strip()
+        task["location_name"] = "Italy"
     try:
         r = httpx.post(f"{BASE}/task_post", headers=_auth_header(),
                        json=[task], timeout=30)
@@ -174,20 +179,34 @@ def post_task(business: BusinessRef) -> str | None:
     return None
 
 
-def collect(task_id: str):
-    """Ritorna (items, total) se il task è pronto, altrimenti (None, None)."""
+# Stati "in lavorazione" DataForSEO: tutto il resto è terminale.
+IN_PROGRESS_CODES = {20100, 40601, 40602}   # created / handed / in queue
+
+
+def collect(task_id: str, expect_name: str | None = None):
+    """(items, total) se pronto; (None, None) se in coda.
+    expect_name è ignorato qui (il place_id confermato garantisce già il
+    match); la firma è uniforme a quella del connettore TripAdvisor.
+    Un task in ERRORE terminale ritorna ([], None): sblocca la dashboard
+    invece di restare 'in raccolta' per sempre."""
     if not (task_id and os.environ.get("DATAFORSEO_AUTH")):
-        return None, None
+        return [], None   # niente credenziali: non resterà mai pronto
     try:
         g = httpx.get(f"{BASE}/task_get/{task_id}", headers=_auth_header(), timeout=30)
         g.raise_for_status()
         t = (g.json().get("tasks") or [])
-        if t and t[0].get("status_code") == 20000 and t[0].get("result"):
-            res = t[0]["result"][0]
+        if not t:
+            return None, None
+        sc = t[0].get("status_code")
+        if sc == 20000 and t[0].get("result"):
+            res = t[0]["result"][0] or {}
             return (res.get("items") or []), res.get("reviews_count")
+        if sc in IN_PROGRESS_CODES:
+            return None, None
+        # terminale (es. 40501 invalid field, 40200 credito, 20000 senza result)
+        return [], None
     except httpx.HTTPError:
-        pass
-    return None, None
+        return None, None
 
 
 def normalize_items(items: list, business: BusinessRef, run: ConnectorRun):

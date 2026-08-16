@@ -62,11 +62,27 @@ def run_as24test(url_or_name: str) -> None:
         print("\n✗ Nessuna recensione estratta. Vedi 'hint'/'error' qui sopra.")
 
 
+def run_tptest(domain: str) -> None:
+    """Diagnostica lo scraper Trustpilot pubblico su un dominio reale (no DB)."""
+    import json as _json
+    from ekko.connectors.trustpilot_public import diagnose
+    print(f"Test scraper Trustpilot pubblico su: {domain}\n")
+    result = diagnose(domain)
+    print(_json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    if result.get("ok"):
+        print(f"\n✓ Funziona: {result['reviews_in_page']} recensioni nella "
+              f"prima pagina (metodo: {result['method']}).")
+    else:
+        print("\n✗ Nessuna recensione estratta. Vedi 'hint'/'error' qui sopra.")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "demo"
     if cmd == "ingest":
         run_ingest(" ".join(sys.argv[2:]) or "demo")
     elif cmd == "as24test":
         run_as24test(" ".join(sys.argv[2:]) or "autosport-snc")
+    elif cmd == "tptest":
+        run_tptest(sys.argv[2] if len(sys.argv) > 2 else "unieuro.it")
     else:
         run_demo()

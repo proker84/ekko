@@ -81,12 +81,15 @@ class ScraperConnectorsTest(unittest.TestCase):
         self.assertEqual(RecensioniVerificateConnector()._url(BIZ),
                          "https://www.recensioni-verificate.com/recensioni-clienti/acmemotors.it.html")
 
-    def test_disabled_by_default(self):
+    def test_default_flags(self):
         for k in ("EKKO_ENABLE_AUTOSCOUT24", "EKKO_ENABLE_FEEDATY",
                   "EKKO_ENABLE_RECENSIONI_VERIFICATE", "FACEBOOK_PAGE_TOKEN"):
             os.environ.pop(k, None)
         from ekko.connectors import autoscout24, certified, facebook
-        self.assertFalse(autoscout24.enabled())
+        self.assertTrue(autoscout24.enabled())     # ON di default (automotive)
+        os.environ["EKKO_ENABLE_AUTOSCOUT24"] = "0"
+        self.assertFalse(autoscout24.enabled())    # spegnibile con =0
+        os.environ.pop("EKKO_ENABLE_AUTOSCOUT24", None)
         self.assertFalse(certified.feedaty_enabled())
         self.assertFalse(certified.rv_enabled())
         self.assertFalse(facebook.enabled())

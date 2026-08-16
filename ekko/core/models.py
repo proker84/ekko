@@ -66,6 +66,8 @@ class BusinessRef(BaseModel):
     autoscout24_url: Optional[str] = None
     # Facebook: id pagina di proprietà (Graph API, richiede token)
     facebook_page_id: Optional[str] = None
+    # Fonti escluse dall'utente nello step di identificazione
+    skipped_sources: list[str] = Field(default_factory=list)
 
 
 class Urgency(str, Enum):

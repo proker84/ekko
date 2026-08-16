@@ -17,16 +17,24 @@ from typing import Iterator
 
 import httpx
 
-from ekko.core.models import (BusinessRef, FeedbackObject, Lineage, Source,
-                              make_feedback_id, pseudonymize_author)
+from ekko.core.models import (BusinessRef, FeedbackObject, Lineage, Reply,
+                              Source, make_feedback_id, pseudonymize_author)
 from . import pubscrape
 from .base import BaseConnector, ConnectorRun
 
 BASE = "https://www.autoscout24.it/concessionari"
+# API interna usata dal pulsante "Mostra più recensioni" (scoperta via DevTools):
+#   POST /api/dealer-detail/fetch-reviews  {"customerId": <id>, "skip": N}
+# risponde con blocchi di 10: {reviewId, stars, created "dd.mm.yyyy", name,
+# reviewText, replyText, grades[...]}
+API_URL = "https://www.autoscout24.it/api/dealer-detail/fetch-reviews"
+CID_RE = re.compile(r'"customerId"\s*:\s*(\d+)')
+API_MAX = int(os.environ.get("EKKO_AS24_MAX_REVIEWS", "500"))
 
 
 def enabled() -> bool:
-    return os.environ.get("EKKO_ENABLE_AUTOSCOUT24") == "1"
+    # Attivo di DEFAULT (fonte chiave per l'automotive); si spegne con =0.
+    return os.environ.get("EKKO_ENABLE_AUTOSCOUT24", "1") != "0"
 
 
 def _slug(name: str) -> str:
@@ -45,24 +53,58 @@ def _review_key(rv: dict) -> tuple:
     return (rv["author"], rv["date"].isoformat(), rv["stars"])
 
 
-def scrape_all(url: str, max_pages: int = 15) -> tuple[list[dict], str]:
-    """Recensioni da tutte le pagine (?page=N); si ferma quando non arriva
-    niente di nuovo (se il sito ignora il parametro, si ferma alla 2ª)."""
-    seen, out, method = set(), [], "none"
-    for page in range(1, max_pages + 1):
-        page_url = url if page == 1 else f"{url}?page={page}"
-        try:
-            reviews, m = pubscrape.scrape_reviews(page_url)
-        except httpx.HTTPError:
-            break
-        fresh = [rv for rv in reviews if _review_key(rv) not in seen]
-        if not fresh:
-            break
-        method = m
-        for rv in fresh:
-            seen.add(_review_key(rv))
-            out.append(rv)
-    return out, method
+def _api_reviews(page_html: str, page_url: str) -> list[dict] | None:
+    """Recensioni COMPLETE via API interna; None se il customerId non si trova."""
+    import time as _time
+    m = CID_RE.search(page_html)
+    if not m:
+        return None
+    cid = int(m.group(1))
+    out = []
+    with httpx.Client(headers={"User-Agent": pubscrape.UA, "Referer": page_url,
+                               "Accept-Language": "it"}, timeout=20) as cl:
+        for skip in range(0, API_MAX, 10):
+            try:
+                r = cl.post(API_URL, json={"customerId": cid, "skip": skip})
+                if r.status_code != 200:
+                    break
+                batch = r.json()
+            except (httpx.HTTPError, ValueError):
+                break
+            if not isinstance(batch, list) or not batch:
+                break
+            for it in batch:
+                d = pubscrape.parse_date(it.get("created"))
+                stars = it.get("stars")
+                if d is None or stars is None:
+                    continue
+                out.append({"author": it.get("name") or "anon",
+                            "stars": float(stars), "scale_max": 5.0,
+                            "text": (it.get("reviewText") or "").strip() or None,
+                            "date": d,
+                            "native_id": it.get("reviewId"),
+                            "reply": (it.get("replyText") or "").strip() or None})
+            if len(batch) < 10:
+                break
+            _time.sleep(0.4)   # rate limit gentile
+    return out
+
+
+def scrape_all(url: str) -> tuple[list[dict], str]:
+    """Tutte le recensioni del concessionario.
+    1) API interna fetch-reviews (complete, con risposte del venditore);
+    2) fallback: parsing della pagina (prime ~10, strategie pubscrape)."""
+    html = pubscrape.fetch_html(url)
+    api = _api_reviews(html, url)
+    if api:
+        return api, "api"
+    for method, fn in (("jsonld", pubscrape.iter_jsonld_reviews),
+                       ("microdata", pubscrape.iter_microdata_reviews),
+                       ("deep", pubscrape.deep_harvest)):
+        found = list(fn(html))
+        if found:
+            return found, method
+    return [], "none"
 
 
 def diagnose(url_or_name: str) -> dict:
@@ -110,7 +152,8 @@ class AutoScout24Connector(BaseConnector):
         for rv in reviews:
             if since and rv["date"] <= since:
                 continue
-            native = f"{rv['author']}|{rv['date'].isoformat()}|{rv['stars']}"
+            native = rv.get("native_id") or \
+                f"{rv['author']}|{rv['date'].isoformat()}|{rv['stars']}"
             run.fetched += 1
             yield FeedbackObject(
                 id=make_feedback_id("autoscout24", business.id, native),
@@ -121,6 +164,7 @@ class AutoScout24Connector(BaseConnector):
                 text=rv["text"],
                 rating=FeedbackObject.normalize_rating(rv["stars"], rv["scale_max"]),
                 published_at=rv["date"],
+                reply=Reply(text=rv["reply"]) if rv.get("reply") else None,
                 lineage=Lineage(connector=self.source_name, run_id=run.run_id,
                                 license="public_crawl"),
             )

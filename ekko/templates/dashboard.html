@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ekko Dashboard — {{ business_name }}</title>
-{% if pending %}<meta http-equiv="refresh" content="12">{% endif %}
+{# niente meta-refresh: ricaricava la pagina azzerando filtri e vista.
+   L'aggiornamento è gestito via JS (polling /progress + filtri persistenti). #}
 <style>
   /* Tema di default: navy scuro stile Glanceable.
      Palette sentiment validata (validate_palette.js, all-pairs, surface #111e52):
@@ -389,8 +390,16 @@ const fmt = n => n.toLocaleString("it-IT");
 const MS_DAY = 864e5;
 const NOW = new Date(DATA.generated_ts);
 
-/* ---------------- stato filtri ---------------- */
+/* ---------------- stato filtri (persistente: sopravvive ai refresh) ---------------- */
 const state = { period:"all", source:"all", sent:"all", topic:"all", search:"", shown:20, sort:"new", hideEmpty:false };
+const STATE_KEY = "ekko_state_" + (DATA.business_id || "x");
+try {
+  const saved = JSON.parse(sessionStorage.getItem(STATE_KEY) || "null");
+  if (saved) Object.assign(state, saved);
+} catch(_) {}
+function persistState(){
+  try { sessionStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch(_) {}
+}
 
 function sentClass(f){ return f.sent > 0.2 ? "pos" : (f.sent < -0.2 ? "neg" : "neu"); }
 
@@ -1094,7 +1103,7 @@ function renderAll(){
   const stale=document.getElementById("staleNote");
   stale.classList.toggle("hidden", lastRunKey===null || lastRunKey===filterKey());
 }
-function setFilter(key,val){ state[key]=val; state.shown=20; renderAll(); }
+function setFilter(key,val){ state[key]=val; state.shown=20; persistState(); renderAll(); }
 function syncControls(){
   document.getElementById("fPeriod").value=state.period;
   document.getElementById("fSource").value=state.source;
@@ -1114,6 +1123,12 @@ function syncControls(){
   [...all.entries()].sort((a,b)=>b[1]-a[1]).forEach(([t])=>{
     const o=document.createElement("option"); o.value=t;
     o.textContent=TOPIC_LABELS(t); topicSel.appendChild(o); });
+  /* stato ripristinato: se un valore salvato non esiste più, torna a "all" */
+  if(![...srcSel.options].some(o=>o.value===state.source)) state.source="all";
+  if(![...topicSel.options].some(o=>o.value===state.topic)) state.topic="all";
+  document.getElementById("revSort").value=state.sort;
+  document.getElementById("revHideEmpty").checked=state.hideEmpty;
+  document.getElementById("fSearch").value=state.search;
   document.getElementById("fPeriod").addEventListener("change",e=>setFilter("period",e.target.value));
   srcSel.addEventListener("change",e=>setFilter("source",e.target.value));
   document.getElementById("fSent").addEventListener("change",e=>setFilter("sent",e.target.value));
@@ -1126,8 +1141,8 @@ function syncControls(){
     document.getElementById("fSearch").value=""; renderAll(); });
   document.getElementById("moreBtn").addEventListener("click",()=>{
     state.shown+=30; renderAll(); });
-  document.getElementById("revSort").addEventListener("change",e=>{state.sort=e.target.value;renderAll();});
-  document.getElementById("revHideEmpty").addEventListener("change",e=>{state.hideEmpty=e.target.checked;renderAll();});
+  document.getElementById("revSort").addEventListener("change",e=>{state.sort=e.target.value;persistState();renderAll();});
+  document.getElementById("revHideEmpty").addEventListener("change",e=>{state.hideEmpty=e.target.checked;persistState();renderAll();});
   document.getElementById("revCsv").addEventListener("click",()=>{
     const rows=filtered(); const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
     const head=["data","fonte","stelle","risposta","temi","testo"];
@@ -1155,6 +1170,28 @@ function syncControls(){
   });
 })();
 renderAll();
+
+/* ---------------- aggiornamento automatico (senza perdere i filtri) ----------------
+   Ogni 20s (se raccolta in corso) o 60s chiede /progress: se ci sono NUOVE
+   recensioni ricarica la pagina — i filtri sono in sessionStorage e vengono
+   ripristinati, quindi la vista resta quella che stavi guardando. */
+(function autoRefresh(){
+  if (!DATA.business_id) return;
+  const PENDING = {{ 'true' if pending else 'false' }};
+  const INTERVAL = PENDING ? 20000 : 60000;
+  async function check(){
+    try{
+      const r = await fetch(`/businesses/${DATA.business_id}/progress`,
+                            {headers:{"Accept":"application/json"}});
+      if(!r.ok) return;
+      const j = await r.json();
+      const totalNow = (j.sources||[]).reduce((a,s)=>a+(s.count||0),0);
+      if (totalNow > DATA.feedback.length) { persistState(); location.reload(); }
+    }catch(_){}
+  }
+  setInterval(check, INTERVAL);
+  if (PENDING) setTimeout(check, 8000);
+})();
 </script>
 </body>
 </html>
