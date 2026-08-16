@@ -280,6 +280,49 @@ def _match_google(name: str, city: str | None) -> list[dict]:
     return sorted(out, key=lambda c: -c["conf"])
 
 
+def _serp_urls(query: str, limit: int = 8) -> list[dict]:
+    """Ricerca Google istantanea via DataForSEO SERP live: [{url,title}].
+    È il motore che TROVA da solo le pagine delle aziende sulle piattaforme
+    (TripAdvisor, AutoScout24, Trustpilot…) senza chiedere nulla all'utente."""
+    import httpx as _hx
+    auth = os.environ.get("DATAFORSEO_AUTH")
+    if not auth:
+        return []
+    try:
+        r = _hx.post(
+            "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
+            headers={"Authorization": f"Basic {auth}",
+                     "Content-Type": "application/json"},
+            json=[{"keyword": query, "location_name": "Italy",
+                   "language_code": "it", "depth": 10}],
+            timeout=20)
+        r.raise_for_status()
+        tasks = r.json().get("tasks") or []
+        if not tasks or tasks[0].get("status_code") != 20000:
+            return []
+        items = ((tasks[0].get("result") or [{}])[0].get("items")) or []
+    except (_hx.HTTPError, ValueError, IndexError):
+        return []
+    out = []
+    for it in items:
+        if it.get("type") != "organic":
+            continue
+        u, t = it.get("url"), it.get("title")
+        if u and t:
+            out.append({"url": u, "title": t})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _clean_serp_title(title: str) -> str:
+    """'Rossi Auto - Recensioni | TripAdvisor' -> 'Rossi Auto'."""
+    t = re.split(r"\s*[|–—·]\s*", title.strip())[0]
+    t = re.sub(r"\s*[-:]?\s*(Recensioni|Reviews|Impressioni e valutazioni"
+               r"|Leggi le recensioni)\b.*$", "", t, flags=re.I)
+    return t.strip() or title.strip()
+
+
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 
 
@@ -300,18 +343,47 @@ def _page_title(url: str) -> str | None:
         return None
 
 
+def _match_tripadvisor(name: str, city: str | None) -> list[dict]:
+    """Trova la pagina TripAdvisor dell'azienda via ricerca SERP (autonoma)."""
+    from ekko.core import matching
+    from urllib.parse import urlparse
+    q = f"site:tripadvisor.it {name} {city or ''}".strip()
+    out = []
+    for hit in _serp_urls(q):
+        path = urlparse(hit["url"]).path.lstrip("/")
+        # solo pagine-scheda (Review) — esclude liste/categorie
+        if "_Review-" not in path:
+            continue
+        label = _clean_serp_title(hit["title"])
+        out.append({"token": path, "label": label, "detail": hit["url"],
+                    "conf": matching.confidence(name, label, city,
+                                                hit["title"] + " " + hit["url"])})
+    return sorted(out, key=lambda c: -c["conf"])[:5]
+
+
 def _match_trustpilot(name: str, domain: str | None, city: str | None) -> list[dict]:
     from ekko.core import matching
-    if not domain:
-        return []
-    title = _page_title(f"https://it.trustpilot.com/review/{domain}")
-    if title is None:
-        return []
-    conf = matching.confidence(name, title or domain, city) if title else 75
-    # il dominio l'ha fornito l'utente: alziamo il pavimento
-    conf = max(conf, 80)
-    return [{"token": domain, "label": title or domain,
-             "detail": f"trustpilot.com/review/{domain}", "conf": conf}]
+    if domain:
+        title = _page_title(f"https://it.trustpilot.com/review/{domain}")
+        if title is None:
+            return []
+        conf = max(matching.confidence(name, title or domain, city)
+                   if title else 75, 80)   # dominio fornito dall'utente
+        return [{"token": domain, "label": title or domain,
+                 "detail": f"trustpilot.com/review/{domain}", "conf": conf}]
+    # nessun dominio: lo trova la SERP
+    out = []
+    for hit in _serp_urls(f"site:trustpilot.com {name}"):
+        m = re.search(r"/review/([a-z0-9.\-]+)", hit["url"])
+        if not m:
+            continue
+        dom = m.group(1)
+        label = _clean_serp_title(hit["title"])
+        out.append({"token": dom, "label": label,
+                    "detail": f"trustpilot.com/review/{dom}",
+                    "conf": matching.confidence(name, label, city,
+                                                hit["title"] + " " + hit["url"])})
+    return sorted(out, key=lambda c: -c["conf"])[:5]
 
 
 def _match_autoscout24(name: str, url: str | None, city: str | None) -> list[dict]:
@@ -320,12 +392,26 @@ def _match_autoscout24(name: str, url: str | None, city: str | None) -> list[dic
     if url:
         return [{"token": url, "label": "Pagina indicata da te",
                  "detail": url, "conf": 100}]
+    out = []
+    # 1) tentativo diretto sullo slug del nome
     guess = f"{BASE}/{_slug(name)}"
     title = _page_title(guess + "/recensioni")
-    if title is None:
-        return []
-    return [{"token": guess, "label": title or name, "detail": guess,
-             "conf": matching.confidence(name, title or name, city)}]
+    if title:
+        out.append({"token": guess, "label": title, "detail": guess,
+                    "conf": matching.confidence(name, title, city)})
+    # 2) ricerca SERP autonoma sulle pagine concessionario
+    for hit in _serp_urls(f"site:autoscout24.it/concessionari {name} {city or ''}".strip()):
+        m = re.search(r"autoscout24\.it/concessionari/([a-z0-9\-]+)", hit["url"])
+        if not m:
+            continue
+        u = f"{BASE}/{m.group(1)}"
+        if any(c["token"] == u for c in out):
+            continue
+        label = _clean_serp_title(hit["title"])
+        out.append({"token": u, "label": label, "detail": u,
+                    "conf": matching.confidence(name, label, city,
+                                                hit["title"] + " " + hit["url"])})
+    return sorted(out, key=lambda c: -c["conf"])[:5]
 
 
 def _match_certified(name: str, domain: str | None, which: str) -> list[dict]:
@@ -371,9 +457,10 @@ def match():
         sources.append(pack("google", "Google", _match_google(name, city),
                             none_hint="Nessun risultato: precisa nome o città"))
     if _ta.enabled():
-        # TripAdvisor (DataForSEO) non ha una ricerca istantanea: si usa il nome
-        sources.append(pack("tripadvisor", "TripAdvisor", [],
-                            keyword_mode=True))
+        ta_cands = _match_tripadvisor(name, city)
+        # con candidati: scelta normale; senza: fallback ricerca per nome
+        sources.append(pack("tripadvisor", "TripAdvisor", ta_cands,
+                            keyword_mode=not ta_cands))
     if os.environ.get("TRUSTPILOT_API_KEY") or trustpilot_public.enabled():
         sources.append(pack("trustpilot", "Trustpilot",
                             _match_trustpilot(name, domain, city),
@@ -414,6 +501,7 @@ def search():
         autoscout24_url=(request.form.get("autoscout24_url") or "").strip() or None,
         # identità confermate nello step di identificazione (se presenti)
         google_place_id=(request.form.get("google_place_id") or "").strip() or None,
+        tripadvisor_url_path=(request.form.get("tripadvisor_url_path") or "").strip() or None,
         skipped_sources=sorted(skips),
     )
     try:

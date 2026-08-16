@@ -37,9 +37,13 @@ def post_task(business: BusinessRef) -> str | None:
     if not enabled():
         return None
     depth = DEPTH or min(business.review_depth or 100, 1000)
-    task = {"keyword": f"{business.name} {business.city or ''}".strip(),
-            "location_name": "Italy", "language_code": "it",
-            "depth": depth, "priority": 2}
+    task = {"language_code": "it", "depth": depth, "priority": 2}
+    if business.tripadvisor_url_path:
+        # pagina CONFERMATA nello step di identificazione: match esatto
+        task["url_path"] = business.tripadvisor_url_path
+    else:
+        task["keyword"] = f"{business.name} {business.city or ''}".strip()
+        task["location_name"] = "Italy"
     try:
         r = httpx.post(f"{BASE}/task_post", headers=_auth_header(),
                        json=[task], timeout=30)

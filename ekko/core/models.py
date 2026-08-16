@@ -62,6 +62,8 @@ class BusinessRef(BaseModel):
     ta_task_id: Optional[str] = None
     ta_pending: bool = False
     total_reviews_tripadvisor: Optional[int] = None
+    # url_path TripAdvisor confermato nello step di identificazione (match esatto)
+    tripadvisor_url_path: Optional[str] = None
     # Automotive: URL pagina concessionario AutoScout24 (…/concessionari/<slug>)
     autoscout24_url: Optional[str] = None
     # Facebook: id pagina di proprietà (Graph API, richiede token)

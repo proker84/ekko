@@ -416,6 +416,7 @@ function startSearch(){
     if(m.token==="__skip__"){ skips.push(s.key); return; }
     if(m.token==="__keyword__"||m.token==null) return;
     if(s.key==="google") fd.set("google_place_id", m.token);
+    else if(s.key==="tripadvisor") fd.set("tripadvisor_url_path", m.token);
     else if(s.key==="autoscout24") fd.set("autoscout24_url", m.token);
     else if(["trustpilot","feedaty","recensioni_verificate"].includes(s.key))
       fd.set("domain", m.token);

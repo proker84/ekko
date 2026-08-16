@@ -136,3 +136,76 @@ class MatchEndpointTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SerpMatchersTest(unittest.TestCase):
+    """I match vengono TROVATI dal sistema (SERP), non chiesti all'utente."""
+
+    def setUp(self):
+        import importlib
+        from ekko.api import main
+        importlib.reload(main)
+        self.main = main
+        self.main._serp_urls = lambda q, limit=8: self._serp(q)
+        self._serp_map = {}
+
+    def _serp(self, q):
+        for key, hits in self._serp_map.items():
+            if key in q:
+                return hits
+        return []
+
+    def test_tripadvisor_found_by_serp(self):
+        self._serp_map["tripadvisor"] = [
+            {"url": "https://www.tripadvisor.it/Restaurant_Review-g123-d456-Reviews-Da_Mario-Milano.html",
+             "title": "Da Mario - Recensioni | TripAdvisor"},
+            {"url": "https://www.tripadvisor.it/Restaurants-g123-Milano.html",
+             "title": "I migliori ristoranti a Milano"}]
+        c = self.main._match_tripadvisor("Da Mario", "Milano")
+        self.assertEqual(len(c), 1)  # la pagina-lista viene esclusa
+        self.assertTrue(c[0]["token"].startswith("Restaurant_Review-"))
+        self.assertGreaterEqual(c[0]["conf"], 90)
+
+    def test_autoscout24_found_by_serp(self):
+        self.main._page_title = lambda url: None   # slug diretto fallisce
+        self._serp_map["autoscout24"] = [
+            {"url": "https://www.autoscout24.it/concessionari/pasquale-auto-srl",
+             "title": "Pasquale Auto Srl | Impressioni e valutazioni"}]
+        c = self.main._match_autoscout24("Pasquale Auto", None, "Napoli")
+        self.assertEqual(len(c), 1)
+        self.assertIn("/concessionari/pasquale-auto-srl", c[0]["token"])
+
+    def test_trustpilot_without_domain_uses_serp(self):
+        self._serp_map["trustpilot"] = [
+            {"url": "https://it.trustpilot.com/review/pasqualeauto.it",
+             "title": "Pasquale Auto | Leggi le recensioni"}]
+        c = self.main._match_trustpilot("Pasquale Auto", None, None)
+        self.assertEqual(c[0]["token"], "pasqualeauto.it")
+        self.assertGreaterEqual(c[0]["conf"], 90)
+
+    def test_ta_post_task_uses_url_path(self):
+        import os as _os
+        from ekko.core.models import BusinessRef
+        from ekko.connectors import tripadvisor_dfs as ta
+        captured = {}
+
+        class FR:
+            def raise_for_status(self): pass
+            def json(self): return {"tasks": [{"id": "t9", "status_code": 20100}]}
+
+        import httpx
+        orig = httpx.post
+        httpx.post = lambda url, headers=None, json=None, timeout=None: (
+            captured.update(task=json[0]) or FR())
+        _os.environ["DATAFORSEO_AUTH"] = "x"
+        try:
+            b = BusinessRef(id="b", name="Da Mario",
+                            tripadvisor_url_path="Restaurant_Review-g1-d2-Reviews-x.html")
+            tid = ta.post_task(b)
+        finally:
+            httpx.post = orig
+            _os.environ.pop("DATAFORSEO_AUTH", None)
+        self.assertEqual(tid, "t9")
+        self.assertEqual(captured["task"]["url_path"],
+                         "Restaurant_Review-g1-d2-Reviews-x.html")
+        self.assertNotIn("keyword", captured["task"])
