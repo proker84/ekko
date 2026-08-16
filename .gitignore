@@ -20,3 +20,7 @@ _to_delete/
 _ekko_auth_deploy.tgz
 ekko_sync.tgz
 *.db
+_ekko_dash_deploy.tgz
+_ekko_progress_deploy.tgz
+_ekko_sources_deploy.tgz
+_ekko_as24fix.tgz

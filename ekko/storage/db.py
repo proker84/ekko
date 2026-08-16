@@ -129,6 +129,16 @@ def insert_feedback(fo: FeedbackObject) -> bool:
             return False
 
 
+def count_by_source(business_id: str) -> dict:
+    """Numero di recensioni salvate per fonte (per le progress bar)."""
+    init_db()
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT source, COUNT(*) n FROM feedback WHERE business_id=? GROUP BY source",
+            (business_id,)).fetchall()
+    return {r["source"]: r["n"] for r in rows}
+
+
 def max_published(business_id: str, source: str) -> datetime | None:
     with get_conn() as c:
         row = c.execute(

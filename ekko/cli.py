@@ -48,8 +48,25 @@ def run_ingest(name: str) -> None:
     print(score_business(business.id).model_dump_json(indent=2))
 
 
+def run_as24test(url_or_name: str) -> None:
+    """Diagnostica lo scraper AutoScout24 su un concessionario reale (no DB)."""
+    import json as _json
+    from ekko.connectors.autoscout24 import diagnose
+    print(f"Test scraper AutoScout24 su: {url_or_name}\n")
+    result = diagnose(url_or_name)
+    print(_json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    if result.get("ok"):
+        print(f"\n✓ Funziona: {result['reviews_total']} recensioni "
+              f"(metodo: {result['method']}).")
+    else:
+        print("\n✗ Nessuna recensione estratta. Vedi 'hint'/'error' qui sopra.")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "ingest":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "demo"
+    if cmd == "ingest":
         run_ingest(" ".join(sys.argv[2:]) or "demo")
+    elif cmd == "as24test":
+        run_as24test(" ".join(sys.argv[2:]) or "autosport-snc")
     else:
         run_demo()

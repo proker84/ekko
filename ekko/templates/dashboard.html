@@ -6,34 +6,31 @@
 <title>Ekko Dashboard — {{ business_name }}</title>
 {% if pending %}<meta http-equiv="refresh" content="12">{% endif %}
 <style>
+  /* Tema di default: navy scuro stile Glanceable.
+     Palette sentiment validata (validate_palette.js, all-pairs, surface #111e52):
+     pos #0ea88a · neg #c94b55 · neu #4d82f3 — tutti i check PASS. */
   .viz-root {
-    color-scheme: light;
+    color-scheme: dark;
+    --surface-1:#111e52; --page:#0a1240;
+    --ink-1:#ffffff; --ink-2:#b9c3e6; --ink-3:#8290c5;
+    --grid:#243069; --baseline:#33407e; --border:rgba(130,155,255,.16);
+    --s1:#4d82f3; --s2:#d95926;               /* categorical: google, trustpilot */
+    --pos:#0ea88a; --neu:#4d82f3; --neg:#c94b55;
+    --good:#0ea88a; --warning:#fab219; --serious:#ec835a; --critical:#e5484d;
+    --up:#0ea88a;
+    --accent-wash:rgba(77,130,243,.14);
+    --hero-grad:linear-gradient(135deg,#3b63f0,#2746c8);
+  }
+  :root[data-theme="light"] .viz-root { color-scheme: light;
     --surface-1:#fcfcfb; --page:#f9f9f7;
     --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
     --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
-    --s1:#2a78d6; --s2:#eb6834;               /* categorical: google, trustpilot */
-    --pos:#2a78d6; --neu:#c3c2b7; --neg:#e34948;   /* diverging blue↔red, neutral gray */
+    --s1:#2a78d6; --s2:#eb6834;
+    --pos:#1baf7a; --neu:#2a78d6; --neg:#e34948;
     --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
     --up:#006300;
     --accent-wash:rgba(42,120,214,.10);
-  }
-  :root[data-theme="dark"] .viz-root { color-scheme: dark;
-    --surface-1:#1a1a19; --page:#0d0d0d;
-    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
-    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
-    --s1:#3987e5; --s2:#d95926;
-    --pos:#3987e5; --neu:#57565196; --neu:#575651; --neg:#e66767;
-    --up:#0ca30c; --accent-wash:rgba(57,135,229,.14);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) .viz-root { color-scheme: dark;
-      --surface-1:#1a1a19; --page:#0d0d0d;
-      --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
-      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
-      --s1:#3987e5; --s2:#d95926;
-      --pos:#3987e5; --neu:#575651; --neg:#e66767;
-      --up:#0ca30c; --accent-wash:rgba(57,135,229,.14);
-    }
+    --hero-grad:linear-gradient(135deg,#2a78d6,#1e5cb0);
   }
   * { box-sizing:border-box; margin:0; }
   body.viz-root { font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -74,6 +71,10 @@
   .tile .note { font-size:.72rem; color:var(--ink-3); margin-top:2px; }
   .tile .note.neg { color:var(--critical); }
   .tile .note.pos { color:var(--up); }
+  .tile-hero { background:var(--hero-grad); border:none; }
+  .tile-hero .lbl { color:rgba(255,255,255,.78); }
+  .tile-hero .val { color:#fff; font-size:30px; }
+  .tile-hero .note { color:rgba(255,255,255,.66); }
   /* ---------- chart cards ---------- */
   .grid2 { display:grid; grid-template-columns:minmax(260px,1fr) minmax(340px,1.6fr);
     gap:16px; margin-bottom:16px; }
@@ -102,14 +103,21 @@
   .topic-row.sel { background:var(--accent-wash); outline:1px solid var(--s1); }
   .topic-row .tn { font-size:.8rem; color:var(--ink-1); text-align:right;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  /* ---------- reviews ---------- */
-  .rev { border-bottom:1px solid var(--grid); padding:12px 2px; font-size:.85rem; }
-  .rev:last-child { border-bottom:none; }
-  .rev .meta { color:var(--ink-3); font-size:.73rem; margin-top:4px;
+  /* ---------- reviews (card stile Glanceable) ---------- */
+  .rev { border:1px solid var(--border); border-left:3px solid var(--neu);
+    border-radius:12px; padding:12px 14px; margin-bottom:10px; font-size:.85rem; }
+  .rev.pos { border-left-color:var(--pos); }
+  .rev.neg { border-left-color:var(--neg); }
+  .rev .meta { color:var(--ink-3); font-size:.73rem; margin-top:6px;
     display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   .stars { color:#e8a413; letter-spacing:1px; font-size:.8rem; }
+  .badge.sent-pos { background:color-mix(in srgb,var(--pos) 18%,transparent); color:var(--pos); }
+  .badge.sent-neu { background:color-mix(in srgb,var(--neu) 18%,transparent); color:var(--neu); }
+  .badge.sent-neg { background:color-mix(in srgb,var(--neg) 18%,transparent); color:var(--neg); }
   .chip { background:var(--accent-wash); color:var(--s1); border-radius:20px;
     padding:1px 9px; font-size:.7rem; cursor:pointer; border:none; }
+  .chip.pos { background:color-mix(in srgb,var(--pos) 16%,transparent); color:var(--pos); }
+  .chip.neg { background:color-mix(in srgb,var(--neg) 16%,transparent); color:var(--neg); }
   .badge { border-radius:20px; padding:1px 8px; font-size:.68rem; font-weight:600; }
   .badge.rep { background:color-mix(in srgb, var(--good) 15%, transparent); color:var(--up); }
   .badge.urg { background:color-mix(in srgb, var(--critical) 12%, transparent); color:var(--critical); }
@@ -282,15 +290,32 @@
 
 <div class="card" style="margin-bottom:16px">
   <div class="chead">
-    <h2>Temi: menzioni negative ← → positive</h2>
+    <h2>Analisi tematica</h2>
+    <button class="tgl" data-tv="tvBubbles" type="button">⊞ tabella</button>
+  </div>
+  <div class="sub" style="margin-bottom:6px">La dimensione della bolla è il numero di
+    menzioni, il colore il sentiment dominante. Clicca una bolla per filtrare tutta la dashboard.</div>
+  <div id="bubbleWrap"></div>
+  <div class="legend">
+    <span class="key"><span class="sw" style="background:var(--pos)"></span>Prevalenza positiva</span>
+    <span class="key"><span class="sw" style="background:var(--neg)"></span>Prevalenza negativa</span>
+    <span class="key"><span class="sw" style="background:var(--neu)"></span>Prevalenza neutra</span>
+  </div>
+  <table class="tv hidden" id="tvBubbles"></table>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="chead">
+    <h2>Sentiment per tema</h2>
     <button class="tgl" data-tv="tvTopics" type="button">⊞ tabella</button>
   </div>
   <div class="sub" style="margin-bottom:10px">Clicca un tema per filtrare tutta la dashboard.
-    Le menzioni neutre sono nella tabella e nel tooltip.</div>
+    I numeri dentro le barre sono le menzioni.</div>
   <div id="topicsWrap"></div>
   <div class="legend">
-    <span class="key"><span class="sw" style="background:var(--neg)"></span>Negative</span>
     <span class="key"><span class="sw" style="background:var(--pos)"></span>Positive</span>
+    <span class="key"><span class="sw" style="background:var(--neg)"></span>Negative</span>
+    <span class="key"><span class="sw" style="background:var(--neu)"></span>Neutre</span>
   </div>
   <table class="tv hidden" id="tvTopics"></table>
 </div>
@@ -353,8 +378,9 @@
 <script>
 "use strict";
 const DATA = JSON.parse(document.getElementById("ekko-data").textContent);
-const SOURCE_LABELS = { google:"Google", trustpilot:"Trustpilot", meta:"Meta",
-  tripadvisor:"TripAdvisor", demo:"Demo", conversational:"Conversazioni" };
+const SOURCE_LABELS = { google:"Google", trustpilot:"Trustpilot", meta:"Facebook",
+  tripadvisor:"TripAdvisor", autoscout24:"AutoScout24", feedaty:"Feedaty",
+  recensioni_verificate:"Rec. Verificate", demo:"Demo", conversational:"Conversazioni" };
 const SOURCE_SLOT = {};   // fonte -> slot categorico fisso (mai riciclato sui filtri)
 [...new Set(DATA.feedback.map(f=>f.s))].sort().forEach((s,i)=>SOURCE_SLOT[s]=i%2?"--s2":"--s1");
 const TOPIC_LABELS = t => t.replace(/\./g," · ").replace(/_/g," ");
@@ -410,16 +436,20 @@ function renderKpis(rows){
   const avg = n ? rows.reduce((a,f)=>a+f.st,0)/n : 0;
   const rep = n ? rows.filter(f=>f.rep).length/n : 0;
   const crit = rows.filter(f=>f.st<=2 && !f.rep).length;
-  const tiles = [
+  const tiles = [];
+  if (DATA.total_reviews)
+    tiles.push(["Recensioni totali · Google", fmt(DATA.total_reviews),
+      fmt(DATA.feedback.length)+" analizzate", null, true]);
+  tiles.push(
     ["Recensioni nel periodo", fmt(n), null, null],
     ["Rating medio", n? avg.toFixed(2)+" / 5" : "—", null, null],
     ["Tasso di risposta", n? Math.round(rep*100)+"%" : "—",
       rep<0.3&&n? "sotto il target 60%":"", rep<0.3?"neg":"" ],
     ["Critiche senza risposta", fmt(crit),
       crit>0?"recensioni ≤2★ da gestire":"tutto gestito", crit>0?"neg":"pos"],
-  ];
-  tiles.forEach(([lbl,val,note,cls])=>{
-    const d=document.createElement("div"); d.className="card tile";
+  );
+  tiles.forEach(([lbl,val,note,cls,hero])=>{
+    const d=document.createElement("div"); d.className="card tile"+(hero?" tile-hero":"");
     const l=document.createElement("div"); l.className="lbl"; l.textContent=lbl;
     const v=document.createElement("div"); v.className="val"; v.textContent=val;
     d.append(l,v);
@@ -587,58 +617,180 @@ function renderTrend(rows){
     months.map(m=>[m,(byM.get(m).s/byM.get(m).n).toFixed(2),fmt(byM.get(m).n)]),[1,2]);
 }
 
-/* ---------------- temi: diverging bars ---------------- */
-function renderTopics(rows){
-  const wrap=document.getElementById("topicsWrap"); wrap.replaceChildren();
+/* ---------------- aggregazione temi (condivisa) ---------------- */
+function aggTopics(rows){
   const agg=new Map();
   rows.forEach(f=>f.topics.forEach(t=>{
     const o=agg.get(t)||{pos:0,neu:0,neg:0,tot:0};
     o[sentClass(f)]++; o.tot++; agg.set(t,o); }));
-  const topics=[...agg.entries()].sort((a,b)=>b[1].tot-a[1].tot).slice(0,10);
+  return agg;
+}
+function domSent(o){
+  if(o.neg>=o.pos && o.neg>=o.neu) return "--neg";
+  if(o.pos>=o.neu) return "--pos";
+  return "--neu";
+}
+
+/* ---------------- analisi tematica: bolle (stile Glanceable) ---------------- */
+function renderBubbles(rows){
+  const wrap=document.getElementById("bubbleWrap"); wrap.replaceChildren();
+  const agg=aggTopics(rows);
+  const topics=[...agg.entries()].sort((a,b)=>b[1].tot-a[1].tot).slice(0,14);
+  const totalMentions=[...agg.values()].reduce((a,o)=>a+o.tot,0);
   if(!topics.length){ wrap.innerHTML='<div class="empty">Nessun tema nel filtro corrente.</div>';
-    fillTable("tvTopics",["Tema","Negative","Neutre","Positive","Totale"],[],[]); return; }
-  const maxSide=Math.max(...topics.map(([,o])=>Math.max(o.pos,o.neg)));
+    fillTable("tvBubbles",["Tema","Menzioni","% sul totale","Positive","Neutre","Negative"],[],[]); return; }
+  const W=560,H=330,GAP=3;
+  /* raggi: area ∝ menzioni, scalata per riempire ~46% del riquadro */
+  const sumTot=topics.reduce((a,[,o])=>a+o.tot,0);
+  const k=Math.sqrt(0.46*W*H/(Math.PI*sumTot));
+  const items=topics.map(([t,o])=>({t,o,r:Math.max(12,k*Math.sqrt(o.tot))}));
+  /* packing: la più grande al centro, le altre a spirale nel primo punto libero */
+  const placed=[];
+  items.forEach((it,idx)=>{
+    if(!placed.length){ it.x=0; it.y=0; placed.push(it); return; }
+    let done=false;
+    for(let d=placed[0].r+it.r+GAP; d<1600 && !done; d+=5){
+      for(let j=0;j<28;j++){
+        const ang=j/28*2*Math.PI + idx*0.9;
+        const x=d*Math.cos(ang), y=d*Math.sin(ang)*0.62;   /* layout largo */
+        if(placed.every(p=>Math.hypot(p.x-x,p.y-y)>=p.r+it.r+GAP)){
+          it.x=x; it.y=y; placed.push(it); done=true; break; }
+      }
+    }
+    if(!done){ it.x=0; it.y=placed.reduce((a,p)=>Math.max(a,p.y+p.r),0)+it.r+GAP; placed.push(it); }
+  });
+  /* adatta il tutto al viewBox */
+  const minX=Math.min(...placed.map(p=>p.x-p.r)), maxX=Math.max(...placed.map(p=>p.x+p.r));
+  const minY=Math.min(...placed.map(p=>p.y-p.r)), maxY=Math.max(...placed.map(p=>p.y+p.r));
+  const s=Math.min(1,(W-8)/(maxX-minX),(H-8)/(maxY-minY));
+  const ox=W/2-s*(minX+maxX)/2, oy=H/2-s*(minY+maxY)/2;
+  const svgNS="http://www.w3.org/2000/svg";
+  const svg=document.createElementNS(svgNS,"svg");
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width","100%");
+  svg.setAttribute("role","img"); svg.setAttribute("aria-label","Temi per volume di menzioni e sentiment dominante");
+  placed.forEach(p=>{
+    const cx=ox+s*p.x, cy=oy+s*p.y, r=s*p.r;
+    const varName=domSent(p.o);
+    const g=document.createElementNS(svgNS,"g");
+    g.classList.add("clickable"); g.setAttribute("tabindex","0"); g.setAttribute("role","button");
+    const pct=totalMentions?Math.round(p.o.tot/totalMentions*100):0;
+    g.setAttribute("aria-label",`${TOPIC_LABELS(p.t)}: ${p.o.tot} menzioni (${pct}%)`);
+    const c=document.createElementNS(svgNS,"circle");
+    c.setAttribute("cx",cx); c.setAttribute("cy",cy); c.setAttribute("r",r);
+    c.setAttribute("fill",css(varName));
+    c.setAttribute("stroke",css("--surface-1")); c.setAttribute("stroke-width","2");
+    if(state.topic!=="all" && state.topic!==p.t) c.setAttribute("opacity","0.35");
+    if(state.topic===p.t){ c.setAttribute("stroke",css("--ink-1")); c.setAttribute("stroke-width","2.5"); }
+    g.appendChild(c);
+    if(r>=30){
+      const fs=Math.min(13,Math.max(9,r/5));
+      const maxCh=Math.max(5,Math.floor((r*1.7)/(fs*0.62)));
+      /* spezza il nome su max 2 righe (sui separatori o sugli spazi) */
+      const parts=TOPIC_LABELS(p.t).split(/ · | /);
+      const lines=[""];
+      parts.forEach(w=>{
+        const cur=lines[lines.length-1];
+        if(!cur) lines[lines.length-1]=w;
+        else if((cur+" "+w).length<=maxCh) lines[lines.length-1]=cur+" "+w;
+        else lines.push(w);
+      });
+      const shown2=lines.slice(0,2);
+      if(lines.length>2) shown2[1]+="…";
+      shown2.forEach((ln,i)=>{
+        if(ln.length>maxCh) shown2[i]=ln.slice(0,maxCh-1)+"…";
+      });
+      const y0=cy-3-(shown2.length-1)*(fs*0.62);
+      const t1=document.createElementNS(svgNS,"text");
+      t1.setAttribute("x",cx); t1.setAttribute("text-anchor","middle");
+      t1.setAttribute("font-size",fs); t1.setAttribute("font-weight","650");
+      t1.setAttribute("fill","#fff");
+      shown2.forEach((ln,i)=>{
+        const ts=document.createElementNS(svgNS,"tspan");
+        ts.setAttribute("x",cx); ts.setAttribute("y",y0+i*(fs+2));
+        ts.textContent=ln; t1.appendChild(ts);
+      });
+      const t2=document.createElementNS(svgNS,"text");
+      t2.setAttribute("x",cx); t2.setAttribute("y",cy+13+(shown2.length-1)*3); t2.setAttribute("text-anchor","middle");
+      t2.setAttribute("font-size","11"); t2.setAttribute("fill","rgba(255,255,255,.85)");
+      t2.textContent=pct+"%";
+      g.append(t1,t2);
+    } else if(r>=17){
+      const t2=document.createElementNS(svgNS,"text");
+      t2.setAttribute("x",cx); t2.setAttribute("y",cy+4); t2.setAttribute("text-anchor","middle");
+      t2.setAttribute("font-size","10"); t2.setAttribute("fill","#fff");
+      t2.textContent=pct+"%";
+      g.appendChild(t2);
+    }
+    const show=e=>ttShow(e,[
+      [TOPIC_LABELS(p.t)+` · ${pct}%`, fmt(p.o.tot)+" menzioni", css(varName)],
+      ["positive", fmt(p.o.pos), css("--pos")],
+      ["neutre",   fmt(p.o.neu), css("--neu")],
+      ["negative", fmt(p.o.neg), css("--neg")]]);
+    g.addEventListener("pointermove",show);
+    g.addEventListener("pointerleave",ttHide);
+    g.addEventListener("focus",e=>ttShow({clientX:innerWidth/2,clientY:innerHeight/2},
+      [[TOPIC_LABELS(p.t), fmt(p.o.tot)+" menzioni", css(varName)]]));
+    g.addEventListener("blur",ttHide);
+    const act=()=>setFilter("topic", state.topic===p.t?"all":p.t);
+    g.addEventListener("click",act);
+    g.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();act();} });
+    svg.appendChild(g);
+  });
+  wrap.appendChild(svg);
+  fillTable("tvBubbles",["Tema","Menzioni","% sul totale","Positive","Neutre","Negative"],
+    topics.map(([t,o])=>[TOPIC_LABELS(t),fmt(o.tot),
+      (totalMentions?Math.round(o.tot/totalMentions*100):0)+"%",
+      fmt(o.pos),fmt(o.neu),fmt(o.neg)]),[1,2,3,4,5]);
+}
+
+/* ---------------- sentiment per tema: barre impilate ---------------- */
+function renderTopics(rows){
+  const wrap=document.getElementById("topicsWrap"); wrap.replaceChildren();
+  const agg=aggTopics(rows);
+  const topics=[...agg.entries()].sort((a,b)=>b[1].tot-a[1].tot).slice(0,11);
+  if(!topics.length){ wrap.innerHTML='<div class="empty">Nessun tema nel filtro corrente.</div>';
+    fillTable("tvTopics",["Tema","Positive","Neutre","Negative","Totale"],[],[]); return; }
+  const maxTot=Math.max(...topics.map(([,o])=>o.tot));
   topics.forEach(([t,o])=>{
     const row=document.createElement("div");
     row.className="topic-row"+(state.topic===t?" sel":"");
     row.setAttribute("tabindex","0"); row.setAttribute("role","button");
     row.setAttribute("aria-label",
-      `${TOPIC_LABELS(t)}: ${o.neg} negative, ${o.neu} neutre, ${o.pos} positive`);
+      `${TOPIC_LABELS(t)}: ${o.pos} positive, ${o.neu} neutre, ${o.neg} negative`);
     const name=document.createElement("div"); name.className="tn";
     name.textContent=TOPIC_LABELS(t); row.appendChild(name);
     const svgNS="http://www.w3.org/2000/svg";
-    const W=480,H=26,C=W/2;
+    const W=480,H=26,USABLE=W-58;   /* spazio a destra per il totale */
     const svg=document.createElementNS(svgNS,"svg");
     svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width","100%");
-    const scale=v=>maxSide? (v/maxSide)*(C-46):0;
-    const mk=(w,dir,color)=>{ if(w<=0) return null;
+    const scale=v=>maxTot? (v/maxTot)*USABLE : 0;
+    let x=0;
+    [[o.pos,"--pos"],[o.neg,"--neg"],[o.neu,"--neu"]].forEach(([v,varName])=>{
+      const w=scale(v); if(w<=0) return;
       const r=document.createElementNS(svgNS,"rect");
-      const px=Math.max(2,w);
-      r.setAttribute("x",dir<0?C-px-1:C+1); r.setAttribute("y",4);
+      const px=Math.max(2,w-2);          /* 2px di gap tra segmenti */
+      r.setAttribute("x",x); r.setAttribute("y",4);
       r.setAttribute("width",px); r.setAttribute("height",18);
-      r.setAttribute("rx","4");
-      r.setAttribute("fill",color);
-      return r; };
-    const nb=mk(scale(o.neg),-1,css("--neg")); if(nb) svg.appendChild(nb);
-    const pb=mk(scale(o.pos), 1,css("--pos")); if(pb) svg.appendChild(pb);
-    const ax=document.createElementNS(svgNS,"line");
-    ax.setAttribute("x1",C); ax.setAttribute("x2",C);
-    ax.setAttribute("y1",1); ax.setAttribute("y2",H-1);
-    ax.setAttribute("stroke",css("--baseline")); svg.appendChild(ax);
-    const ln=document.createElementNS(svgNS,"text");   /* valori alle estremità */
-    ln.setAttribute("x",C-scale(o.neg)-6); ln.setAttribute("y",17);
-    ln.setAttribute("text-anchor","end"); ln.setAttribute("font-size","10");
-    ln.setAttribute("fill",css("--ink-2")); ln.textContent=o.neg||"";
-    const lp=document.createElementNS(svgNS,"text");
-    lp.setAttribute("x",C+scale(o.pos)+6); lp.setAttribute("y",17);
-    lp.setAttribute("font-size","10"); lp.setAttribute("fill",css("--ink-2"));
-    lp.textContent=o.pos||"";
-    svg.append(ln,lp);
+      r.setAttribute("rx","4"); r.setAttribute("fill",css(varName));
+      svg.appendChild(r);
+      if(px>=30){                         /* etichetta diretta dentro il segmento */
+        const tl=document.createElementNS(svgNS,"text");
+        tl.setAttribute("x",x+px/2); tl.setAttribute("y",17);
+        tl.setAttribute("text-anchor","middle"); tl.setAttribute("font-size","10");
+        tl.setAttribute("font-weight","600"); tl.setAttribute("fill","#fff");
+        tl.textContent=fmt(v); svg.appendChild(tl);
+      }
+      x+=w;
+    });
+    const totL=document.createElementNS(svgNS,"text");
+    totL.setAttribute("x",x+8); totL.setAttribute("y",17);
+    totL.setAttribute("font-size","10"); totL.setAttribute("fill",css("--ink-2"));
+    totL.textContent=fmt(o.tot); svg.appendChild(totL);
     row.appendChild(svg);
     const show=e=>ttShow(e,[
+      [ "positive", fmt(o.pos), css("--pos")],
       [ "negative", fmt(o.neg), css("--neg")],
       [ "neutre",   fmt(o.neu), css("--neu")],
-      [ "positive", fmt(o.pos), css("--pos")],
       [ TOPIC_LABELS(t)+" · totale", fmt(o.tot), null]]);
     row.addEventListener("pointermove",show);
     row.addEventListener("pointerleave",ttHide);
@@ -650,8 +802,8 @@ function renderTopics(rows){
     row.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();act();} });
     wrap.appendChild(row);
   });
-  fillTable("tvTopics",["Tema","Negative","Neutre","Positive","Totale"],
-    topics.map(([t,o])=>[TOPIC_LABELS(t),fmt(o.neg),fmt(o.neu),fmt(o.pos),fmt(o.tot)]),[1,2,3,4]);
+  fillTable("tvTopics",["Tema","Positive","Neutre","Negative","Totale"],
+    topics.map(([t,o])=>[TOPIC_LABELS(t),fmt(o.pos),fmt(o.neu),fmt(o.neg),fmt(o.tot)]),[1,2,3,4]);
 }
 
 /* ---------------- lista recensioni ---------------- */
@@ -665,13 +817,17 @@ function renderReviews(rows){
   sorted.sort(SORTS[state.sort]||SORTS.new);
   const shown=sorted.slice(0,state.shown);
   if(!shown.length){ list.innerHTML='<div class="empty">Nessuna recensione con questi filtri.</div>'; }
+  const SENT_BADGE={ pos:["Positiva","sent-pos"], neu:["Neutra","sent-neu"], neg:["Negativa","sent-neg"] };
   shown.forEach(f=>{
-    const d=document.createElement("div"); d.className="rev";
+    const sc=sentClass(f);
+    const d=document.createElement("div"); d.className="rev "+sc;
     const stars=document.createElement("span"); stars.className="stars";
     stars.textContent="★".repeat(Math.round(f.st))+"☆".repeat(5-Math.round(f.st));
+    const sb=document.createElement("span"); sb.className="badge "+SENT_BADGE[sc][1];
+    sb.textContent=SENT_BADGE[sc][0]; sb.style.marginLeft="8px";
     const txt=document.createElement("div"); txt.textContent=" "+(f.txt||"(solo rating)");
-    txt.style.display="inline";
-    d.append(stars,txt);
+    txt.style.display="inline"; txt.style.marginLeft="6px";
+    d.append(stars,sb,txt);
     const meta=document.createElement("div"); meta.className="meta";
     const dot=document.createElement("span"); dot.className="sw";
     dot.style.background=css(SOURCE_SLOT[f.s]||"--s1");
@@ -684,7 +840,7 @@ function renderReviews(rows){
     else if(f.st<=2){ const b=document.createElement("span"); b.className="badge urg";
       b.textContent="da gestire"; meta.appendChild(b); }
     f.topics.forEach(t=>{ const c=document.createElement("button");
-      c.className="chip"; c.type="button"; c.textContent=TOPIC_LABELS(t);
+      c.className="chip "+(sc==="neu"?"":sc); c.type="button"; c.textContent=TOPIC_LABELS(t);
       c.addEventListener("click",()=>setFilter("topic", state.topic===t?"all":t));
       meta.appendChild(c); });
     d.appendChild(meta);
@@ -932,7 +1088,7 @@ function renderAnalysis(rows, ai){
 function renderAll(){
   const rows=filtered();
   renderKpis(rows); renderDonut(rows); renderTrend(rows);
-  renderTopics(rows); renderReviews(rows);
+  renderBubbles(rows); renderTopics(rows); renderReviews(rows);
   syncControls();
   /* analisi eseguita su filtri diversi da quelli correnti → avviso */
   const stale=document.getElementById("staleNote");
@@ -993,8 +1149,7 @@ function syncControls(){
   document.getElementById("btnReanalyze").addEventListener("click",runAnalysis);
   if(location.hash==="#analisi") setTimeout(runAnalysis,50);
   document.getElementById("themeBtn").addEventListener("click",()=>{
-    const cur=document.documentElement.dataset.theme||
-      (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+    const cur=document.documentElement.dataset.theme||"dark";  /* default: navy */
     document.documentElement.dataset.theme=cur==="dark"?"light":"dark";
     renderAll();   /* i colori svg sono risolti da css var a render */
   });

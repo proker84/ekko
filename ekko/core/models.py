@@ -18,8 +18,11 @@ from pydantic import BaseModel, Field
 class Source(str, Enum):
     GOOGLE = "google"
     TRUSTPILOT = "trustpilot"
-    META = "meta"
+    META = "meta"                      # Facebook/Instagram
     TRIPADVISOR = "tripadvisor"
+    AUTOSCOUT24 = "autoscout24"        # recensioni concessionari (automotive)
+    FEEDATY = "feedaty"                # recensioni certificate (Zoorate)
+    VERIFIED_REVIEWS = "recensioni_verificate"  # Avis Vérifiés Italia
     DEMO = "demo"
     CONVERSATIONAL = "conversational"
 
@@ -30,6 +33,9 @@ SOURCE_WEIGHTS: dict[Source, float] = {
     Source.TRUSTPILOT: 0.85,
     Source.META: 0.6,
     Source.TRIPADVISOR: 0.8,
+    Source.AUTOSCOUT24: 0.9,           # verticale forte per l'automotive
+    Source.FEEDATY: 0.7,
+    Source.VERIFIED_REVIEWS: 0.7,
     Source.DEMO: 1.0,
     Source.CONVERSATIONAL: 0.4,
 }
@@ -52,6 +58,14 @@ class BusinessRef(BaseModel):
     dfs_task_id: Optional[str] = None
     dfs_pending: bool = False
     review_depth: Optional[int] = None
+    # TripAdvisor via DataForSEO (task asincrono separato da Google)
+    ta_task_id: Optional[str] = None
+    ta_pending: bool = False
+    total_reviews_tripadvisor: Optional[int] = None
+    # Automotive: URL pagina concessionario AutoScout24 (…/concessionari/<slug>)
+    autoscout24_url: Optional[str] = None
+    # Facebook: id pagina di proprietà (Graph API, richiede token)
+    facebook_page_id: Optional[str] = None
 
 
 class Urgency(str, Enum):

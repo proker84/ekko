@@ -52,12 +52,37 @@
     margin-bottom:6px; color:inherit; text-decoration:none; font-size:.9rem; }
   .recent a:hover { border-color:#2a78d6; }
   .recent .n { color:light-dark(#898781,#898781); font-size:.8rem; }
-  .working { display:none; margin-top:16px; color:light-dark(#52514e,#c3c2b7);
-    font-size:.88rem; text-align:center; }
-  .working .sp { width:14px; height:14px; border:2px solid #2a78d655;
-    border-top-color:#2a78d6; border-radius:50%; display:inline-block;
-    vertical-align:-2px; margin-right:8px; animation:spin .7s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
+  /* ---------- overlay di raccolta: risultati oscurati + progress per fonte ---------- */
+  .collect { position:fixed; inset:0; z-index:50; background:#0a1240;
+    display:flex; align-items:center; justify-content:center; }
+  .collect.hidden { display:none; }
+  .collect .mock { position:absolute; inset:0; filter:blur(7px) brightness(.7);
+    opacity:.38; padding:36px; display:grid; gap:16px; align-content:start;
+    grid-template-columns:repeat(6,1fr); pointer-events:none; }
+  .m { background:#111e52; border:1px solid rgba(130,155,255,.16); border-radius:14px; }
+  .m.h1 { height:90px; } .m.h2 { height:200px; } .m.h3 { height:280px; }
+  .c2 { grid-column:span 2; } .c3 { grid-column:span 3; } .c6 { grid-column:span 6; }
+  .panel { position:relative; z-index:2; width:min(580px,92vw);
+    background:#111e52; border:1px solid rgba(130,155,255,.22); border-radius:20px;
+    padding:32px 36px; box-shadow:0 24px 70px rgba(0,0,0,.55); color:#fff; }
+  .panel .plogo { font-size:1.7rem; font-weight:700; text-align:center; }
+  .panel .plogo span { color:#4d82f3; }
+  .panel h2 { font-size:1.05rem; text-align:center; margin:10px 0 4px; font-weight:650; }
+  .panel .csub { color:#b9c3e6; font-size:.83rem; text-align:center; margin:0 0 20px;
+    line-height:1.5; }
+  .pb { margin:13px 0; }
+  .pb .pl { display:flex; justify-content:space-between; gap:10px; font-size:.85rem;
+    color:#dbe2f9; margin-bottom:6px; }
+  .pb .pl .st { color:#8290c5; font-variant-numeric:tabular-nums; }
+  .pb .tr { height:10px; background:#243069; border-radius:5px; overflow:hidden; }
+  .pb .tr i { display:block; height:100%; width:0%; border-radius:5px;
+    background:linear-gradient(90deg,#3b63f0,#4d82f3); transition:width .5s ease; }
+  .pb.done .tr i { background:#0ea88a; width:100% !important; }
+  .pb.done .pl .st { color:#0ea88a; font-weight:600; }
+  .pb.off .pl { color:#5f6b9e; }
+  .pb.off .pl .st { color:#5f6b9e; font-style:italic; }
+  .chint { color:#8290c5; font-size:.73rem; text-align:center; margin-top:18px; }
   .userbar { position:fixed; top:14px; right:16px; display:flex; align-items:center;
     gap:10px; font-size:.82rem; color:light-dark(#52514e,#c3c2b7); }
   .userbar .who { max-width:220px; overflow:hidden; text-overflow:ellipsis;
@@ -87,8 +112,14 @@
       </div>
       <div class="extra">
         <input name="city" placeholder="Città (aiuta Google) — es. Milano">
-        <input name="domain" placeholder="Dominio (per Trustpilot) — es. azienda.it">
+        <input name="domain" placeholder="Dominio (Trustpilot/Feedaty) — es. azienda.it">
       </div>
+      {% if as24_on %}
+      <div class="extra">
+        <input name="autoscout24_url"
+               placeholder="🚗 URL pagina AutoScout24 (concessionarie) — es. autoscout24.it/concessionari/nome">
+      </div>
+      {% endif %}
       <div class="depth-row">
         <label for="depth">Recensioni da analizzare:</label>
         <input type="number" name="depth" id="depth" value="200" min="10" max="4490"
@@ -105,17 +136,36 @@
         (limite Google/DataForSEO); se l'azienda ne ha meno, arrivano quelle disponibili.</div>
     </div>
   </form>
-  <div class="working" id="working"><span class="sp"></span>
-    Raccolta recensioni in corso… (Google{{ " + Trustpilot" if tp_on else "" }};
-    la raccolta completa può richiedere 2-4 minuti)</div>
+  <!-- Overlay: risultati "oscurati" dietro, ricerca grande al centro, barre per fonte -->
+  <div class="collect hidden" id="collect" role="status" aria-live="polite">
+    <div class="mock" aria-hidden="true">
+      <div class="m h1 c2"></div><div class="m h1 c2"></div><div class="m h1 c2"></div>
+      <div class="m h2 c2"></div><div class="m h2 c2"></div><div class="m h2 c2"></div>
+      <div class="m h3 c3"></div><div class="m h3 c3"></div>
+      <div class="m h2 c6"></div>
+    </div>
+    <div class="panel">
+      <div class="plogo">ekko<span>.</span></div>
+      <h2 id="cTitle">Analisi in corso…</h2>
+      <p class="csub">Stiamo raccogliendo le recensioni fonte per fonte.<br>
+        I risultati si sbloccano solo quando <b>tutte</b> le fonti sono complete.</p>
+      <div id="cBars"></div>
+      <p class="chint">La raccolta completa di Google richiede in genere 2-4 minuti.
+        Puoi lasciare questa pagina aperta: si aggiorna da sola.</p>
+    </div>
+  </div>
 
   <div class="hint">
     Fonti attive:
     <span class="src"><span class="dot {{ 'on' if google_on else 'off' }}"></span>Google</span>
-    <span class="src"><span class="dot {{ 'on' if tp_on else 'off' }}"></span>Trustpilot API</span>
-    <span class="src"><span class="dot {{ 'on' if tp_public_on else 'off' }}"></span>Trustpilot pubblico</span>
+    <span class="src"><span class="dot {{ 'on' if ta_on else 'off' }}"></span>TripAdvisor</span>
+    <span class="src"><span class="dot {{ 'on' if tp_on or tp_public_on else 'off' }}"></span>Trustpilot</span>
+    <span class="src"><span class="dot {{ 'on' if as24_on else 'off' }}"></span>AutoScout24</span>
+    <span class="src"><span class="dot {{ 'on' if feedaty_on else 'off' }}"></span>Feedaty</span>
+    <span class="src"><span class="dot {{ 'on' if rv_on else 'off' }}"></span>Rec. Verificate</span>
+    <span class="src"><span class="dot {{ 'on' if fb_on else 'off' }}"></span>Facebook</span>
     <span class="src"><span class="dot {{ 'on' if ai_on else 'off' }}"></span>Analisi AI{{ ai_label }}</span>
-    <br>Le fonti spente si attivano con le chiavi in <code>.env</code> — senza chiavi si usano i dati demo.
+    <br>Le fonti spente si attivano con le chiavi/flag in <code>.env</code>.
   </div>
 
   {% if recent %}
@@ -130,9 +180,115 @@
   {% endif %}
 
 <script>
-document.getElementById("f").addEventListener("submit",()=>{
+/* ---------- raccolta con overlay: si va ai risultati solo a fonti complete ---------- */
+/* fonti attive (dal server) -> una barra ciascuna; le spente restano in lista grigie */
+const ALL_SOURCES = [
+  ["google",                "Google recensioni",     {{ 'true' if google_on else 'false' }}],
+  ["tripadvisor",           "TripAdvisor",           {{ 'true' if ta_on else 'false' }}],
+  ["trustpilot",            "Trustpilot",            {{ 'true' if tp_on or tp_public_on else 'false' }}],
+  ["autoscout24",           "AutoScout24 · automotive", {{ 'true' if as24_on else 'false' }}],
+  ["feedaty",               "Feedaty",               {{ 'true' if feedaty_on else 'false' }}],
+  ["recensioni_verificate", "Recensioni Verificate", {{ 'true' if rv_on else 'false' }}],
+  ["meta",                  "Facebook",              {{ 'true' if fb_on else 'false' }}],
+];
+const EXPECT_MS = { google: 100000, tripadvisor: 100000, trustpilot: 9000,
+                    autoscout24: 8000, feedaty: 7000, recensioni_verificate: 7000,
+                    meta: 8000 };   /* tempi attesi per la simulazione */
+const bars = {};       /* key -> {el, fill, st, state} */
+let collectStart = 0, ticker = null;
+
+function mkBar(key, label, offline){
+  const d=document.createElement("div"); d.className="pb"+(offline?" off":"");
+  const pl=document.createElement("div"); pl.className="pl";
+  const nm=document.createElement("span"); nm.textContent=label;
+  const st=document.createElement("span"); st.className="st";
+  st.textContent=offline? "non attiva" : "in attesa…";
+  pl.append(nm,st);
+  d.appendChild(pl);
+  let fill=null;
+  if(!offline){
+    const tr=document.createElement("div"); tr.className="tr";
+    fill=document.createElement("i"); tr.appendChild(fill);
+    d.appendChild(tr);
+  }
+  document.getElementById("cBars").appendChild(d);
+  bars[key]={el:d, fill, st, state: offline?"off":"waiting"};
+}
+
+function showCollect(name){
+  document.getElementById("cTitle").textContent=`Analisi di “${name}” in corso`;
+  document.getElementById("cBars").replaceChildren();
+  for (const k of Object.keys(bars)) delete bars[k];
+  ALL_SOURCES.forEach(([k,l,on])=>mkBar(k,l,!on));   /* spente = riga grigia "non attiva" */
+  collectStart=Date.now();
+  document.getElementById("collect").classList.remove("hidden");
+  document.body.style.overflow="hidden";
+  ticker=setInterval(()=>{                       /* avanzamento simulato mentre gira */
+    const el=Date.now()-collectStart;
+    Object.entries(bars).forEach(([k,b])=>{
+      if((b.state!=="running" && b.state!=="waiting")||!b.fill) return;
+      const pct=Math.min(92, 100*(1-Math.exp(-el/(EXPECT_MS[k]||60000))));
+      b.fill.style.width=pct.toFixed(1)+"%";
+    });
+  }, 600);
+}
+
+function applyStates(sources){
+  sources.forEach(s=>{
+    const b=bars[s.key]; if(!b) return;
+    if(s.state==="done"){
+      b.state="done"; b.el.classList.add("done");
+      const tot=s.total? ` su ${Number(s.total).toLocaleString("it-IT")}` : "";
+      b.st.textContent=`✓ ${Number(s.count||0).toLocaleString("it-IT")} recensioni${tot}`;
+    } else {
+      b.state="running";
+      b.st.textContent="raccolta in corso…";
+    }
+  });
+}
+
+async function pollProgress(id){
+  let j=null;
+  try{
+    const r=await fetch(`/businesses/${id}/progress`,{headers:{"Accept":"application/json"}});
+    if(r.ok) j=await r.json();
+  }catch(_){}
+  if(j && j.ok){
+    applyStates(j.sources);
+    if(j.all_done){
+      clearInterval(ticker);
+      Object.values(bars).forEach(b=>{ if(b.state!=="off") b.el.classList.add("done"); });
+      setTimeout(()=>{ location.href=j.dashboard_url; }, 900);
+      return;
+    }
+  }
+  setTimeout(()=>pollProgress(id), 6000);
+}
+
+document.getElementById("f").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const form=e.target;
+  const name=(document.getElementById("name").value||"").trim();
+  if(!name) return;
   document.getElementById("go").disabled=true;
-  document.getElementById("working").style.display="block";
+  showCollect(name);
+  try{
+    const r=await fetch("/search",{ method:"POST", body:new FormData(form),
+      headers:{ "X-Requested-With":"fetch" }});
+    if(!r.ok) throw new Error("http "+r.status);
+    const j=await r.json();
+    if(!j.ok || !j.id) throw new Error("bad payload");
+    applyStates(j.sources||[]);
+    if(j.all_done){ clearInterval(ticker);
+      setTimeout(()=>{ location.href=j.dashboard_url; }, 700); }
+    else pollProgress(j.id);
+  }catch(_){
+    /* fallback senza JS/fetch: submit classico con redirect server-side */
+    clearInterval(ticker);
+    document.getElementById("collect").classList.add("hidden");
+    document.body.style.overflow="";
+    form.submit();
+  }
 });
 
 const COST_PER_REVIEW_EUR = 0.00014; // stima DataForSEO (coda priority) per recensione

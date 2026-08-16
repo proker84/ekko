@@ -107,7 +107,7 @@ def _require_owner_of(business_id: str) -> str:
 
 
 def default_connectors() -> list:
-    from ekko.connectors import dataforseo
+    from ekko.connectors import autoscout24, certified, dataforseo, facebook
     conns = []
     if dataforseo.enabled():
         conns.append(dataforseo.DataForSeoGoogleConnector())  # recensioni Google complete
@@ -117,6 +117,14 @@ def default_connectors() -> list:
         conns.append(TrustpilotConnector())
     if trustpilot_public.enabled():
         conns.append(trustpilot_public.TrustpilotPublicConnector())
+    if autoscout24.enabled():
+        conns.append(autoscout24.AutoScout24Connector())      # automotive (concessionari)
+    if certified.feedaty_enabled():
+        conns.append(certified.FeedatyConnector())
+    if certified.rv_enabled():
+        conns.append(certified.RecensioniVerificateConnector())
+    if facebook.enabled():
+        conns.append(facebook.FacebookConnector())            # pagine di proprietà
     return conns
 
 
@@ -212,14 +220,21 @@ def health():
 @app.get("/")
 @login_required
 def home():
+    from ekko.connectors import (autoscout24, certified, dataforseo,
+                                 facebook, tripadvisor_dfs)
     gw = AIGateway()
     owner, _ = current_owner()
     tpl = _templates.get_template("search.html")
     return tpl.render(
         recent=db.list_businesses(owner_id=owner),
-        google_on=bool(os.environ.get("GOOGLE_MAPS_API_KEY")),
+        google_on=bool(os.environ.get("GOOGLE_MAPS_API_KEY")) or dataforseo.enabled(),
         tp_on=bool(os.environ.get("TRUSTPILOT_API_KEY")),
         tp_public_on=trustpilot_public.enabled(),
+        ta_on=tripadvisor_dfs.enabled(),
+        as24_on=autoscout24.enabled(),
+        feedaty_on=certified.feedaty_enabled(),
+        rv_on=certified.rv_enabled(),
+        fb_on=facebook.enabled(),
         ai_on=gw.available(),
         ai_label=f" · {gw.provider}" if gw.available() else "",
         auth_on=google_oauth.enabled(),
@@ -240,6 +255,7 @@ def search():
         name=name,
         city=(request.form.get("city") or "").strip() or None,
         domain=(request.form.get("domain") or "").strip() or None,
+        autoscout24_url=(request.form.get("autoscout24_url") or "").strip() or None,
     )
     try:
         _d = int(request.form.get("depth") or 0)
@@ -249,18 +265,31 @@ def search():
         pass
     save_business(business, owner_id=owner)
     from ekko.connectors import dataforseo as _dfs
-    # 1) task DataForSEO asincrono (recensioni Google complete): parte in background
+    from ekko.connectors import tripadvisor_dfs as _ta
+    # 1) task asincroni DataForSEO (Google + TripAdvisor): partono in background
     if _dfs.enabled():
         tid = _dfs.post_task(business)
         if tid:
             business.dfs_task_id = tid
             business.dfs_pending = True
-            save_business(business)
+    if _ta.enabled():
+        ta_tid = _ta.post_task(business)
+        if ta_tid:
+            business.ta_task_id = ta_tid
+            business.ta_pending = True
+    if business.dfs_pending or business.ta_pending:
+        save_business(business)
     # 2) fonti veloci subito (Trustpilot pubblico / Google API), NON DataForSEO
     fast = [c for c in default_connectors()
             if type(c).__name__ != "DataForSeoGoogleConnector"]
     if fast:
         ingest(business, fast)
+    # richiesta via fetch dalla home -> JSON per l'overlay con le progress bar
+    if request.headers.get("X-Requested-With") == "fetch":
+        sources = _source_states(business.id)
+        return jsonify(ok=True, id=business.id, sources=sources,
+                       all_done=all(s["state"] == "done" for s in sources) if sources else True,
+                       dashboard_url=f"/businesses/{business.id}/dashboard")
     return redirect(f"/businesses/{business.id}/dashboard")
 
 
@@ -314,29 +343,88 @@ def get_score(business_id: str):
                               mimetype="application/json")
 
 
+def _collect_dfs_if_ready(business_id: str) -> dict:
+    """Ingerisce i task DataForSEO (Google e TripAdvisor) se pronti."""
+    from ekko.connectors import dataforseo as _dfs
+    from ekko.connectors import tripadvisor_dfs as _ta
+    from ekko.connectors.base import ConnectorRun
+    from ekko.core.sentiment import enrich_stage0
+    payload = db.get_business_payload(business_id) or {}
+    for pend_key, task_key, mod, total_attr in (
+            ("dfs_pending", "dfs_task_id", _dfs, "total_reviews_google"),
+            ("ta_pending", "ta_task_id", _ta, "total_reviews_tripadvisor")):
+        if payload.get(pend_key) and payload.get(task_key):
+            items, total = mod.collect(payload[task_key])
+            if items is not None:  # task pronto -> ingerisci
+                biz = BusinessRef.model_validate(payload)
+                run = ConnectorRun()
+                for fo in mod.normalize_items(items, biz, run):
+                    db.insert_feedback(enrich_stage0(fo))
+                setattr(biz, pend_key, False)
+                if total:
+                    setattr(biz, total_attr, int(total))
+                db.upsert_business(biz)
+                payload = db.get_business_payload(business_id) or payload
+    return payload
+
+
+def _source_states(business_id: str, payload: dict | None = None) -> list[dict]:
+    """Stato per-fonte per le progress bar della home."""
+    from ekko.connectors import (autoscout24, certified, dataforseo as _dfs,
+                                 facebook, tripadvisor_dfs as _ta)
+    payload = payload if payload is not None else (db.get_business_payload(business_id) or {})
+    counts = db.count_by_source(business_id)
+    out = []
+    if _dfs.enabled():
+        out.append({"key": "google", "label": "Google",
+                    "state": "running" if payload.get("dfs_pending") else "done",
+                    "count": counts.get("google", 0),
+                    "total": payload.get("total_reviews_google")})
+    elif os.environ.get("GOOGLE_MAPS_API_KEY"):
+        out.append({"key": "google", "label": "Google", "state": "done",
+                    "count": counts.get("google", 0), "total": None})
+    if _ta.enabled():
+        out.append({"key": "tripadvisor", "label": "TripAdvisor",
+                    "state": "running" if payload.get("ta_pending") else "done",
+                    "count": counts.get("tripadvisor", 0),
+                    "total": payload.get("total_reviews_tripadvisor")})
+    if os.environ.get("TRUSTPILOT_API_KEY") or trustpilot_public.enabled():
+        out.append({"key": "trustpilot", "label": "Trustpilot", "state": "done",
+                    "count": counts.get("trustpilot", 0), "total": None})
+    if autoscout24.enabled():
+        out.append({"key": "autoscout24", "label": "AutoScout24", "state": "done",
+                    "count": counts.get("autoscout24", 0), "total": None})
+    if certified.feedaty_enabled():
+        out.append({"key": "feedaty", "label": "Feedaty", "state": "done",
+                    "count": counts.get("feedaty", 0), "total": None})
+    if certified.rv_enabled():
+        out.append({"key": "recensioni_verificate", "label": "Recensioni Verificate",
+                    "state": "done", "count": counts.get("recensioni_verificate", 0),
+                    "total": None})
+    if facebook.enabled():
+        out.append({"key": "meta", "label": "Facebook", "state": "done",
+                    "count": counts.get("meta", 0), "total": None})
+    return out
+
+
+@app.get("/businesses/<business_id>/progress")
+@login_required
+def get_progress(business_id: str):
+    """Polling della home: raccoglie DataForSEO se pronto e riporta lo stato fonti."""
+    _require_owner_of(business_id)
+    payload = _collect_dfs_if_ready(business_id)
+    sources = _source_states(business_id, payload)
+    all_done = all(s["state"] == "done" for s in sources) if sources else True
+    return jsonify(ok=True, sources=sources, all_done=all_done,
+                   dashboard_url=f"/businesses/{business_id}/dashboard")
+
+
 @app.get("/businesses/<business_id>/dashboard")
 @login_required
 def get_dashboard(business_id: str):
     _require_owner_of(business_id)
-    payload = db.get_business_payload(business_id) or {}
-    pending = False
-    if payload.get("dfs_pending") and payload.get("dfs_task_id"):
-        from ekko.connectors import dataforseo as _dfs
-        from ekko.connectors.base import ConnectorRun
-        from ekko.core.sentiment import enrich_stage0
-        items, total = _dfs.collect(payload["dfs_task_id"])
-        if items is not None:  # DataForSEO pronto -> ingerisci
-            biz = BusinessRef.model_validate(payload)
-            run = ConnectorRun()
-            for fo in _dfs.normalize_items(items, biz, run):
-                db.insert_feedback(enrich_stage0(fo))
-            biz.dfs_pending = False
-            if total:
-                biz.total_reviews_google = int(total)
-            db.upsert_business(biz)
-            payload = db.get_business_payload(business_id) or payload
-        else:
-            pending = True
+    payload = _collect_dfs_if_ready(business_id)
+    pending = bool(payload.get("dfs_pending") and payload.get("dfs_task_id"))
     feedback = load_feedback(business_id)
     if not feedback and not pending:
         return jsonify(error="Nessun feedback: eseguire prima l'ingestion"), 404
@@ -359,6 +447,7 @@ def render_dashboard(business_name: str, breakdown, feedback,
         "generated_ts": now.isoformat(),
         "business_id": business_id or _slugify(business_name),
         "business_name": business_name,
+        "total_reviews": total_reviews,
         "feedback": [
             {
                 "d": f.published_at.isoformat(),
