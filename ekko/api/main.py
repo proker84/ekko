@@ -107,7 +107,7 @@ def _require_owner_of(business_id: str) -> str:
     return owner
 
 
-def default_connectors() -> list:
+def default_connectors(owner_id: str | None = None) -> list:
     from ekko.connectors import autoscout24, certified, dataforseo, facebook
     conns = []
     if dataforseo.enabled():
@@ -124,8 +124,8 @@ def default_connectors() -> list:
         conns.append(certified.FeedatyConnector())
     if certified.rv_enabled():
         conns.append(certified.RecensioniVerificateConnector())
-    if facebook.enabled():
-        conns.append(facebook.FacebookConnector())            # pagine di proprietà
+    if facebook.enabled(owner_id):
+        conns.append(facebook.FacebookConnector(owner_id))    # pagine collegate
     return conns
 
 
@@ -194,6 +194,41 @@ def auth_callback():
     return redirect("/")
 
 
+@app.get("/auth/facebook")
+@login_required
+def auth_facebook():
+    """Avvia il collegamento delle pagine Facebook dell'agenzia."""
+    from ekko.auth import facebook_oauth as fb
+    if not fb.enabled():
+        return _auth_error("Facebook non configurato: mancano FACEBOOK_APP_ID "
+                           "e FACEBOOK_APP_SECRET.")
+    state = secrets.token_urlsafe(24)
+    session["fb_state"] = state
+    return redirect(fb.authorization_url(_base_url(), state))
+
+
+@app.get("/auth/facebook/callback")
+@login_required
+def auth_facebook_callback():
+    from ekko.auth import facebook_oauth as fb
+    owner, _ = current_owner()
+    if request.args.get("error"):
+        return _auth_error("Collegamento Facebook annullato.")
+    state = request.args.get("state")
+    if not state or state != session.pop("fb_state", None):
+        return _auth_error("Sessione scaduta: riprova a collegare Facebook.")
+    code = request.args.get("code")
+    tok = fb.exchange_code(_base_url(), code) if code else None
+    if not tok:
+        return _auth_error("Scambio del token Facebook non riuscito.")
+    pages = fb.list_pages(fb.long_lived(tok))
+    if not pages:
+        return _auth_error("Nessuna pagina Facebook trovata per questo account "
+                           "(servono i permessi sulle pagine).")
+    db.upsert_fb_pages(owner, pages, datetime.now(timezone.utc))
+    return redirect("/?fb=" + str(len(pages)))
+
+
 @app.get("/logout")
 def logout():
     session.clear()
@@ -235,7 +270,9 @@ def home():
         as24_on=autoscout24.enabled(),
         feedaty_on=certified.feedaty_enabled(),
         rv_on=certified.rv_enabled(),
-        fb_on=facebook.enabled(),
+        fb_on=facebook.enabled(owner),
+        fb_connectable=facebook.connectable(),
+        fb_pages=len(db.list_fb_pages(owner)) if owner else 0,
         ai_on=gw.available(),
         ai_label=f" · {gw.provider}" if gw.available() else "",
         auth_on=google_oauth.enabled(),
@@ -249,7 +286,55 @@ def home():
 # Ogni _match_* ritorna [{token,label,detail,conf}] (token = ciò che serve
 # alla fonte: place_id, dominio, URL). Funzioni separate = testabili/stubbabili.
 # --------------------------------------------------------------------------
-def _match_google(name: str, city: str | None) -> list[dict]:
+def _match_google_dfs(name: str, city: str | None) -> list[dict]:
+    """Candidati Google via DataForSEO Maps (live).
+
+    FONDAMENTALE: il `place_id` restituito qui è nel namespace di DataForSEO
+    ("Gh…"), lo stesso accettato dall'API recensioni — quindi il match è
+    ESATTO e non dipende più da una keyword indovinata (era la causa dei
+    task Google a 0 recensioni).
+    """
+    import httpx as _hx
+    from ekko.core import matching
+    auth = os.environ.get("DATAFORSEO_AUTH")
+    if not auth:
+        return []
+    try:
+        r = _hx.post(
+            "https://api.dataforseo.com/v3/serp/google/maps/live/advanced",
+            headers={"Authorization": f"Basic {auth}",
+                     "Content-Type": "application/json"},
+            json=[{"keyword": f"{name} {city or ''}".strip(),
+                   "location_name": "Italy", "language_code": "it",
+                   "depth": 20}],
+            timeout=45)
+        r.raise_for_status()
+        tasks = r.json().get("tasks") or []
+        if not tasks or tasks[0].get("status_code") != 20000:
+            return []
+        items = ((tasks[0].get("result") or [{}])[0].get("items")) or []
+    except (_hx.HTTPError, ValueError, IndexError):
+        return []
+    out = []
+    for it in items:
+        pid = it.get("place_id")
+        title = it.get("title")
+        if not (pid and title):
+            continue
+        addr = it.get("address") or ""
+        rating = it.get("rating") or {}
+        votes = rating.get("votes_count")
+        detail = addr + (f" · {votes} recensioni" if votes else "")
+        if rating.get("value"):
+            detail += f" · ★ {rating['value']}"
+        out.append({"token": pid, "label": title, "detail": detail,
+                    "dfs": True, "reviews": votes or 0,
+                    "conf": matching.confidence(name, title, city, addr)})
+    return sorted(out, key=lambda c: (-c["conf"], -c["reviews"]))[:10]
+
+
+def _match_google_places(name: str, city: str | None) -> list[dict]:
+    """Fallback: Google Places API (usato solo senza credenziali DataForSEO)."""
     import httpx as _hx
     from ekko.core import matching
     key = os.environ.get("GOOGLE_MAPS_API_KEY")
@@ -276,8 +361,15 @@ def _match_google(name: str, city: str | None) -> list[dict]:
         if nrev:
             detail += f" · {nrev} recensioni"
         out.append({"token": p.get("id"), "label": label, "detail": detail,
+                    "dfs": False,
                     "conf": matching.confidence(name, label, city, detail)})
     return sorted(out, key=lambda c: -c["conf"])
+
+
+def _match_google(name: str, city: str | None) -> list[dict]:
+    """Preferisce DataForSEO Maps (place_id compatibile con l'API recensioni);
+    ripiega su Google Places solo se DataForSEO non è configurato."""
+    return _match_google_dfs(name, city) or _match_google_places(name, city)
 
 
 def _serp_urls(query: str, limit: int = 8) -> list[dict]:
@@ -479,10 +571,20 @@ def match():
         sources.append(pack("recensioni_verificate", "Recensioni Verificate",
                             _match_certified(name, domain, "rv"),
                             none_hint="Serve il dominio; pagina certificato non trovata"))
-    if _fb.enabled():
-        sources.append(pack("meta", "Facebook",
-                            [{"token": "own", "label": "Pagina collegata (token)",
-                              "detail": "", "conf": 100}]))
+    owner_now, _ = current_owner()
+    if _fb.enabled(owner_now):
+        from ekko.storage import db as _db
+        pages = _db.list_fb_pages(owner_now) if owner_now else []
+        from ekko.core.matching import confidence as _conf
+        cands = [{"token": p["id"], "label": p["name"] or p["id"],
+                  "detail": "pagina collegata",
+                  "conf": _conf(name, p.get("name") or "")} for p in pages]
+        if not cands and os.environ.get("FACEBOOK_PAGE_TOKEN"):
+            cands = [{"token": "own", "label": "Pagina collegata (token)",
+                      "detail": "", "conf": 100}]
+        sources.append(pack("meta", "Facebook", sorted(
+            cands, key=lambda c: -c["conf"])[:10],
+            none_hint="Nessuna pagina collegata corrisponde a questo nome"))
     return jsonify(ok=True, threshold=AUTO_THRESHOLD, sources=sources)
 
 
@@ -537,13 +639,18 @@ def search():
     from ekko.connectors import tripadvisor_dfs as _ta
     # 1) task asincroni DataForSEO: UNO PER SEDE (Google + TripAdvisor)
     if _dfs.enabled() and "google" not in skips:
+        g_pids = _multi("google_dfs_place_ids")   # id nel namespace DataForSEO
         labels = g_labels or [business.google_match_name or business.name]
-        multi = len(labels) > 1
-        for lbl in labels:
-            tid = _dfs.post_task(business, keyword_override=lbl)
+        multi = len(labels) > 1 or len(g_pids) > 1
+        n = max(len(labels), len(g_pids))
+        for i in range(n):
+            lbl = labels[i] if i < len(labels) else None
+            pid = g_pids[i] if i < len(g_pids) else None
+            tid = _dfs.post_task(business, keyword_override=lbl, place_id=pid)
             if tid:
                 business.dfs_tasks.append({
                     "id": tid, "label": lbl if multi else None,
+                    "place_id": pid, "keyword": lbl,
                     "pending": True, "total": None, "retried": False})
         if business.dfs_tasks:
             business.dfs_task_id = business.dfs_tasks[0]["id"]   # compat
@@ -564,14 +671,14 @@ def search():
     if business.dfs_tasks or business.ta_tasks:
         save_business(business)
     # 2) fonti veloci subito (scraper/API), escluse quelle saltate dall'utente
-    fast = [c for c in default_connectors()
+    fast = [c for c in default_connectors(owner)
             if type(c).__name__ != "DataForSeoGoogleConnector"
             and c.source_name not in skips]
     if fast:
         ingest(business, fast)
     # richiesta via fetch dalla home -> JSON per l'overlay con le progress bar
     if request.headers.get("X-Requested-With") == "fetch":
-        sources = _source_states(business.id)
+        sources = _source_states(business.id, owner_id=owner)
         return jsonify(ok=True, id=business.id, sources=sources,
                        all_done=all(s["state"] == "done" for s in sources) if sources else True,
                        dashboard_url=f"/businesses/{business.id}/dashboard")
@@ -669,12 +776,18 @@ def _collect_dfs_if_ready(business_id: str) -> dict:
             changed = True
             # AUTO-RECUPERO Google: sede andata a vuoto -> un solo nuovo
             # tentativo con il nome "grezzo" dell'azienda.
-            if (mod is _dfs and run.fetched == 0 and not t.get("retried")
-                    and t.get("label")):
+            if mod is _dfs and run.fetched == 0 and not t.get("retried"):
                 t["retried"] = True
-                new_tid = _dfs.post_task(biz, keyword_override=biz.name)
+                # se avevamo usato il place_id, riprova con la keyword (e
+                # viceversa): una delle due vie porta quasi sempre a casa
+                if t.get("place_id"):
+                    new_tid = _dfs.post_task(
+                        biz, keyword_override=t.get("keyword") or biz.name)
+                else:
+                    new_tid = _dfs.post_task(biz, keyword_override=biz.name)
                 if new_tid:
-                    t.update(id=new_tid, pending=True, total=None)
+                    t.update(id=new_tid, pending=True, total=None,
+                             place_id=None)
         if grand_total:
             setattr(biz, total_attr, grand_total)
         still = any(t.get("pending") for t in tasks)
@@ -687,7 +800,8 @@ def _collect_dfs_if_ready(business_id: str) -> dict:
     return payload
 
 
-def _source_states(business_id: str, payload: dict | None = None) -> list[dict]:
+def _source_states(business_id: str, payload: dict | None = None,
+                   owner_id: str | None = None) -> list[dict]:
     """Stato per-fonte per le progress bar della home."""
     from ekko.connectors import (autoscout24, certified, dataforseo as _dfs,
                                  facebook, tripadvisor_dfs as _ta)
@@ -721,7 +835,7 @@ def _source_states(business_id: str, payload: dict | None = None) -> list[dict]:
         out.append({"key": "recensioni_verificate", "label": "Recensioni Verificate",
                     "state": "done", "count": counts.get("recensioni_verificate", 0),
                     "total": None})
-    if facebook.enabled():
+    if facebook.enabled(owner_id):
         out.append({"key": "meta", "label": "Facebook", "state": "done",
                     "count": counts.get("meta", 0), "total": None})
     return [s for s in out if s["key"] not in skips]
@@ -733,7 +847,8 @@ def get_progress(business_id: str):
     """Polling della home: raccoglie DataForSEO se pronto e riporta lo stato fonti."""
     _require_owner_of(business_id)
     payload = _collect_dfs_if_ready(business_id)
-    sources = _source_states(business_id, payload)
+    owner, _ = current_owner()
+    sources = _source_states(business_id, payload, owner_id=owner)
     all_done = all(s["state"] == "done" for s in sources) if sources else True
     return jsonify(ok=True, sources=sources, all_done=all_done,
                    dashboard_url=f"/businesses/{business_id}/dashboard")

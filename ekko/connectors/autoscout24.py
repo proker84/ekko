@@ -29,7 +29,7 @@ BASE = "https://www.autoscout24.it/concessionari"
 # reviewText, replyText, grades[...]}
 API_URL = "https://www.autoscout24.it/api/dealer-detail/fetch-reviews"
 CID_RE = re.compile(r'"customerId"\s*:\s*(\d+)')
-API_MAX = int(os.environ.get("EKKO_AS24_MAX_REVIEWS", "500"))
+API_MAX = int(os.environ.get("EKKO_AS24_MAX_REVIEWS", "1000"))
 
 
 def enabled() -> bool:

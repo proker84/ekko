@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS businesses (
   owner_id TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_businesses_owner ON businesses(owner_id);
+CREATE TABLE IF NOT EXISTS fb_pages (
+  page_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  name TEXT,
+  token TEXT NOT NULL,
+  connected_at TEXT NOT NULL,
+  PRIMARY KEY (page_id, owner_id)
+);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,          -- 'sub' Google (stabile)
   email TEXT,
@@ -101,6 +109,29 @@ def get_business_owner(business_id: str) -> str | None:
         row = c.execute("SELECT owner_id FROM businesses WHERE id=?",
                         (business_id,)).fetchone()
     return row["owner_id"] if row else None
+
+
+def upsert_fb_pages(owner_id: str, pages: list[dict], now: datetime) -> int:
+    """Salva le pagine Facebook collegate da un'agenzia. Ritorna quante."""
+    init_db()
+    with get_conn() as c:
+        for p in pages:
+            c.execute(
+                "INSERT INTO fb_pages(page_id,owner_id,name,token,connected_at) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(page_id,owner_id) DO UPDATE SET "
+                "name=excluded.name, token=excluded.token",
+                (p["id"], owner_id, p.get("name"), p["token"], now.isoformat()))
+    return len(pages)
+
+
+def list_fb_pages(owner_id: str) -> list[dict]:
+    init_db()
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT page_id, name, token FROM fb_pages WHERE owner_id=? "
+            "ORDER BY name", (owner_id,)).fetchall()
+    return [{"id": r["page_id"], "name": r["name"], "token": r["token"]}
+            for r in rows]
 
 
 def upsert_user(sub: str, email: str | None, name: str | None,

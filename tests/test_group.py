@@ -23,13 +23,13 @@ class GroupSearchTest(unittest.TestCase):
         from ekko.api import main
         importlib.reload(main)
         self.main = main
-        main.default_connectors = lambda: []
+        main.default_connectors = lambda owner_id=None: []
         self.posted = []
         from ekko.connectors import dataforseo as dfs
         self.dfs = dfs
         # salva gli originali: vanno ripristinati o "sporcano" gli altri test
         self._orig_post, self._orig_collect = dfs.post_task, dfs.collect
-        dfs.post_task = lambda biz, keyword_override=None: (
+        dfs.post_task = lambda biz, keyword_override=None, place_id=None: (
             self.posted.append(keyword_override) or f"task{len(self.posted)}")
 
     def tearDown(self):

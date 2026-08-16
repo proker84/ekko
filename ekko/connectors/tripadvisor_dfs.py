@@ -20,6 +20,7 @@ from .base import ConnectorRun
 
 BASE = "https://api.dataforseo.com/v3/business_data/tripadvisor/reviews"
 DEPTH = int(os.environ.get("EKKO_TRIPADVISOR_DEPTH", "0") or 0)
+MIN_DEPTH = 200      # minimo per fonte (richiesta prodotto)
 
 
 def enabled() -> bool:
@@ -37,7 +38,7 @@ def post_task(business: BusinessRef, url_path_override: str | None = None) -> st
     url_path_override: scheda di UNA sede specifica (gruppi multi-sede)."""
     if not enabled():
         return None
-    depth = DEPTH or min(business.review_depth or 100, 1000)
+    depth = DEPTH or min(max(business.review_depth or MIN_DEPTH, MIN_DEPTH), 1000)
     task = {"language_code": "it", "depth": depth, "priority": 2}
     url_path = url_path_override or business.tripadvisor_url_path
     if url_path:

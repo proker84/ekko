@@ -137,12 +137,16 @@
 </style>
 </head>
 <body>
-  {% if auth_on and user_email %}
   <div class="userbar">
+    {% if auth_on and user_email %}
     <span class="who">🏢 {{ user_name or user_email }}</span>
-    <a href="/logout">Esci</a>
+    {% endif %}
+    {% if fb_connectable %}
+    <a href="/auth/facebook" title="Collega le pagine Facebook dei tuoi clienti">
+      {% if fb_pages %}📘 {{ fb_pages }} pagine FB{% else %}📘 Collega Facebook{% endif %}</a>
+    {% endif %}
+    {% if auth_on and user_email %}<a href="/logout">Esci</a>{% endif %}
   </div>
-  {% endif %}
   <div class="logo">ekko<span>.</span></div>
   <div class="tag">Che reputazione ha questa azienda? Scrivilo. Ekko fa il resto.</div>
 
@@ -164,7 +168,7 @@
       </div>
       {% endif %}
       <div class="depth-row">
-        <label for="depth">Recensioni da analizzare:</label>
+        <label for="depth">Recensioni da analizzare <b>per ogni fonte</b>:</label>
         <input type="number" name="depth" id="depth" value="200" min="10" max="4490"
                step="10" list="depthpresets">
         <datalist id="depthpresets">
@@ -175,8 +179,9 @@
         </datalist>
         <span class="cost" id="cost"></span>
       </div>
-      <div class="depth-hint">Scrivi quante ne vuoi. Massimo ~4490 per ricerca
-        (limite Google/DataForSEO); se l'azienda ne ha meno, arrivano quelle disponibili.</div>
+      <div class="depth-hint">Il valore vale <b>per ogni fonte e per ogni sede</b>
+        (es. 200 = 200 da Google + 200 da TripAdvisor + tutte quelle di AutoScout24).
+        Massimo ~4490 per fonte; se ce ne sono meno, arrivano tutte quelle disponibili.</div>
     </div>
   </form>
   <!-- Overlay: risultati "oscurati" dietro, ricerca grande al centro, barre per fonte -->
@@ -227,7 +232,7 @@
     <span class="src"><span class="dot {{ 'on' if as24_on else 'off' }}"></span>AutoScout24</span>
     <span class="src"><span class="dot {{ 'on' if feedaty_on else 'off' }}"></span>Feedaty</span>
     <span class="src"><span class="dot {{ 'on' if rv_on else 'off' }}"></span>Rec. Verificate</span>
-    <span class="src"><span class="dot {{ 'on' if fb_on else 'off' }}"></span>Facebook</span>
+    <span class="src"><span class="dot {{ 'on' if fb_on else 'off' }}"></span>Facebook{% if fb_connectable and not fb_on %} (da collegare){% endif %}</span>
     <span class="src"><span class="dot {{ 'on' if ai_on else 'off' }}"></span>Analisi AI{{ ai_label }}</span>
     <br>Le fonti spente si attivano con le chiavi/flag in <code>.env</code>.
   </div>
@@ -472,10 +477,13 @@ function startSearch(){
     if(s.key==="google"){
       /* nomi ESATTI delle schede scelte: chiave con cui DataForSEO trova le
          sedi giuste (il place_id di Places non gli è compatibile) */
-      const labels=tokens.map(t=>{
-        const c=(s.candidates||[]).find(x=>String(x.token)===t);
-        return c ? c.label : null; }).filter(Boolean);
+      const chosen=tokens.map(t=>(s.candidates||[]).find(
+        x=>String(x.token)===t)).filter(Boolean);
+      const labels=chosen.map(c=>c.label);
       if(labels.length) fd.set("google_labels", JSON.stringify(labels));
+      /* id nel namespace DataForSEO (dai risultati Maps): match ESATTO */
+      const dfsIds=chosen.filter(c=>c.dfs).map(c=>String(c.token));
+      if(dfsIds.length) fd.set("google_dfs_place_ids", JSON.stringify(dfsIds));
       fd.set("google_place_id", tokens[0]);
       if(labels[0]) fd.set("google_label", labels[0]);
     }

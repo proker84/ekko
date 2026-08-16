@@ -59,7 +59,7 @@ class MatchEndpointTest(unittest.TestCase):
             [{"token": domain, "label": name, "detail": "tp", "conf": 82}]
             if domain else [])
         main._match_autoscout24 = lambda name, url, city: []
-        main.default_connectors = lambda: []
+        main.default_connectors = lambda owner_id=None: []
         import ekko.connectors.dataforseo as dfs
         self.dfs = dfs
 
@@ -258,3 +258,59 @@ class GoogleKeywordTest(unittest.TestCase):
         from ekko.core.models import BusinessRef
         t = self._post_capture(BusinessRef(id="b", name="Eataly", city="Roma"))
         self.assertEqual(t["keyword"], "Eataly Roma")
+
+
+class GoogleDfsPlaceIdTest(unittest.TestCase):
+    """Google: il place_id DataForSEO (namespace Gh…) va usato tale e quale."""
+
+    def test_post_task_uses_dfs_place_id(self):
+        import httpx
+        from ekko.connectors import dataforseo as dfs
+        from ekko.core.models import BusinessRef
+        cap = {}
+
+        class FR:
+            def raise_for_status(self): pass
+            def json(self): return {"tasks": [{"id": "tX", "status_code": 20100}]}
+
+        orig = httpx.post
+        httpx.post = lambda url, headers=None, json=None, timeout=None: (
+            cap.update(task=json[0]) or FR())
+        os.environ["DATAFORSEO_AUTH"] = "x"
+        try:
+            tid = dfs.post_task(BusinessRef(id="b", name="X", city="Roma"),
+                                place_id="GhIJQWDl0CIeQUARxks3icF8U8A")
+        finally:
+            httpx.post = orig
+            os.environ.pop("DATAFORSEO_AUTH", None)
+        self.assertEqual(tid, "tX")
+        self.assertEqual(cap["task"]["place_id"], "GhIJQWDl0CIeQUARxks3icF8U8A")
+        self.assertNotIn("keyword", cap["task"])
+        self.assertEqual(cap["task"]["depth"], 200)   # minimo per fonte
+
+    def test_dfs_maps_candidates_carry_dfs_flag(self):
+        import importlib
+        import httpx
+        from ekko.api import main
+        importlib.reload(main)
+
+        class FR:
+            def raise_for_status(self): pass
+
+            def json(self):
+                return {"tasks": [{"status_code": 20000, "result": [{"items": [
+                    {"place_id": "Gh1", "title": "Pasquarelli Auto Volkswagen",
+                     "address": "Via Po 127, San Giovanni Teatino",
+                     "rating": {"value": 4.6, "votes_count": 858}}]}]}]}
+
+        orig = httpx.post
+        httpx.post = lambda *a, **k: FR()
+        os.environ["DATAFORSEO_AUTH"] = "x"
+        try:
+            cands = main._match_google("Pasquarelli Auto", "San Giovanni Teatino")
+        finally:
+            httpx.post = orig
+            os.environ.pop("DATAFORSEO_AUTH", None)
+        self.assertEqual(cands[0]["token"], "Gh1")
+        self.assertTrue(cands[0]["dfs"])
+        self.assertIn("858", cands[0]["detail"])

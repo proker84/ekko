@@ -73,7 +73,7 @@ class FeedatyConnector(_CertifiedBase):
     source = Source.FEEDATY
 
     def _enabled(self) -> bool:
-        return os.environ.get("EKKO_ENABLE_FEEDATY") == "1"
+        return feedaty_enabled()
 
     def _url(self, business: BusinessRef) -> str | None:
         if not business.domain:
@@ -87,7 +87,7 @@ class RecensioniVerificateConnector(_CertifiedBase):
     source = Source.VERIFIED_REVIEWS
 
     def _enabled(self) -> bool:
-        return os.environ.get("EKKO_ENABLE_RECENSIONI_VERIFICATE") == "1"
+        return rv_enabled()
 
     def _url(self, business: BusinessRef) -> str | None:
         if not business.domain:
@@ -97,8 +97,9 @@ class RecensioniVerificateConnector(_CertifiedBase):
 
 
 def feedaty_enabled() -> bool:
-    return os.environ.get("EKKO_ENABLE_FEEDATY") == "1"
+    # attiva di DEFAULT (si spegne con =0): senza dominio non produce nulla
+    return os.environ.get("EKKO_ENABLE_FEEDATY", "1") != "0"
 
 
 def rv_enabled() -> bool:
-    return os.environ.get("EKKO_ENABLE_RECENSIONI_VERIFICATE") == "1"
+    return os.environ.get("EKKO_ENABLE_RECENSIONI_VERIFICATE", "1") != "0"

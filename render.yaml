@@ -46,3 +46,7 @@ services:
         sync: false            # token pagina Meta (solo pagine di proprietà)
       - key: FACEBOOK_PAGE_ID
         sync: false
+      - key: FACEBOOK_APP_ID
+        sync: false            # app Meta (collega pagine Facebook)
+      - key: FACEBOOK_APP_SECRET
+        sync: false

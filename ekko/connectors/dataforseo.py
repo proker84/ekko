@@ -21,7 +21,7 @@ from ekko.core.models import (BusinessRef, FeedbackObject, Lineage, Reply,
 from .base import BaseConnector, ConnectorRun
 
 BASE = "https://api.dataforseo.com/v3/business_data/google/reviews"
-DEPTH = int(os.environ.get("EKKO_DATAFORSEO_DEPTH", "100"))
+DEPTH = int(os.environ.get("EKKO_DATAFORSEO_DEPTH", "200"))
 POLL_TIMEOUT_S = int(os.environ.get("EKKO_DATAFORSEO_TIMEOUT", "240"))
 
 
@@ -154,12 +154,31 @@ def _auth_header() -> dict:
             "Content-Type": "application/json"}
 
 
-def post_task(business: BusinessRef, keyword_override: str | None = None) -> str | None:
+def post_task(business: BusinessRef, keyword_override: str | None = None,
+              place_id: str | None = None) -> str | None:
     """Posta il task recensioni Google (priority) e ritorna il task_id.
-    keyword_override: nome di UNA sede specifica (gruppi multi-sede)."""
+
+    place_id: identificativo DataForSEO (namespace "Gh…", ottenuto dal loro
+      endpoint Maps) -> MATCH ESATTO, è la via preferita.
+    keyword_override: nome di UNA sede specifica (fallback senza place_id).
+    """
     if not os.environ.get("DATAFORSEO_AUTH"):
         return None
     depth = business.review_depth or DEPTH
+    if place_id:
+        task = {"language_code": "it", "depth": depth, "priority": 2,
+                "place_id": place_id}
+        try:
+            r = httpx.post(f"{BASE}/task_post", headers=_auth_header(),
+                           json=[task], timeout=30)
+            r.raise_for_status()
+            tasks = r.json().get("tasks") or []
+            if tasks and tasks[0].get("status_code") in (20000, 20100):
+                return tasks[0]["id"]
+            _log_task_error(tasks, f"place_id={place_id}")
+        except httpx.HTTPError:
+            pass
+        # se il place_id viene rifiutato si prosegue con la keyword
     # NB: NON si passa google_place_id a DataForSEO — il loro `place_id` usa il
     # namespace Google Maps ("GhIJ…"), diverso da quello della Places API
     # ("ChIJ…") che risolviamo noi: il task fallirebbe restituendo 0 recensioni.
@@ -167,6 +186,7 @@ def post_task(business: BusinessRef, keyword_override: str | None = None) -> str
     # identificazione (google_match_name), che è già disambiguato.
     keyword = (keyword_override or business.google_match_name
                or business.name).strip()
+    keyword = keyword.replace(" - ", " ").replace(" – ", " ")
     if business.city and business.city.lower() not in keyword.lower():
         keyword = f"{keyword} {business.city}".strip()
     task = {"language_code": "it", "depth": depth, "priority": 2,

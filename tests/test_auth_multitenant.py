@@ -45,7 +45,7 @@ class MultiTenantTest(unittest.TestCase):
         import importlib
         from ekko.api import main
         importlib.reload(main)
-        main.default_connectors = lambda: []  # nessun side effect
+        main.default_connectors = lambda owner_id=None: []  # nessun side effect
         c = main.app.test_client()
         self.assertEqual(c.get("/").status_code, 200)          # home diretta
         r = c.post("/search", data={"name": "Eataly"})
@@ -60,7 +60,7 @@ class MultiTenantTest(unittest.TestCase):
         import importlib
         from ekko.api import main
         importlib.reload(main)
-        main.default_connectors = lambda: []
+        main.default_connectors = lambda owner_id=None: []
 
         # home senza login -> redirect a /login
         anon = main.app.test_client()

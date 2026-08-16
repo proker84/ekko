@@ -86,12 +86,18 @@ class ScraperConnectorsTest(unittest.TestCase):
                   "EKKO_ENABLE_RECENSIONI_VERIFICATE", "FACEBOOK_PAGE_TOKEN"):
             os.environ.pop(k, None)
         from ekko.connectors import autoscout24, certified, facebook
-        self.assertTrue(autoscout24.enabled())     # ON di default (automotive)
-        os.environ["EKKO_ENABLE_AUTOSCOUT24"] = "0"
-        self.assertFalse(autoscout24.enabled())    # spegnibile con =0
-        os.environ.pop("EKKO_ENABLE_AUTOSCOUT24", None)
-        self.assertFalse(certified.feedaty_enabled())
-        self.assertFalse(certified.rv_enabled())
+        # tutte le fonti "senza chiave" sono ON di default (richiesta prodotto):
+        # se mancano i dati identificativi non producono nulla, quindi è sicuro
+        self.assertTrue(autoscout24.enabled())
+        self.assertTrue(certified.feedaty_enabled())
+        self.assertTrue(certified.rv_enabled())
+        for var, fn in (("EKKO_ENABLE_AUTOSCOUT24", autoscout24.enabled),
+                        ("EKKO_ENABLE_FEEDATY", certified.feedaty_enabled),
+                        ("EKKO_ENABLE_RECENSIONI_VERIFICATE", certified.rv_enabled)):
+            os.environ[var] = "0"
+            self.assertFalse(fn(), var)            # spegnibile con =0
+            os.environ.pop(var, None)
+        # Facebook richiede il token: senza, resta spento
         self.assertFalse(facebook.enabled())
 
 
