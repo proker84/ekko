@@ -61,6 +61,11 @@ class BusinessRef(BaseModel):
     # nome ESATTO della scheda Google confermata (keyword precisa per DataForSEO)
     google_match_name: Optional[str] = None
     dfs_retried: bool = False        # un solo tentativo di recupero automatico
+    # --- GRUPPI / CATENE: più sedi analizzate insieme -------------------
+    # ogni task: {"id","label","pending","total","retried"}
+    dfs_tasks: list[dict] = Field(default_factory=list)      # Google, una per sede
+    ta_tasks: list[dict] = Field(default_factory=list)       # TripAdvisor
+    autoscout24_urls: list[str] = Field(default_factory=list)  # più concessionari
     # TripAdvisor via DataForSEO (task asincrono separato da Google)
     ta_task_id: Optional[str] = None
     ta_pending: bool = False
@@ -132,6 +137,8 @@ class FeedbackObject(BaseModel):
     rating: Optional[float] = None  # normalizzato 0..1 (5 stelle -> 1.0)
     published_at: datetime
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # sede/insegna di provenienza (gruppi multi-sede); None = azienda singola
+    location: Optional[str] = None
     reply: Optional[Reply] = None
     likes: int = 0
     enrichment: Enrichment = Field(default_factory=Enrichment)

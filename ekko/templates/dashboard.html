@@ -266,6 +266,8 @@
     </select></div>
   <div><label for="fTopic">Tema</label>
     <select id="fTopic"><option value="all">Tutti i temi</option></select></div>
+  <div id="locFilterWrap" class="hidden"><label for="fLoc">Sede</label>
+    <select id="fLoc"><option value="all">Tutte le sedi</option></select></div>
   <div style="flex:1"><label for="fSearch">Cerca nel testo</label>
     <input type="search" id="fSearch" placeholder="es. consegna, personale…"></div>
   <button class="reset" id="fReset" type="button">✕ Azzera filtri</button>
@@ -287,6 +289,22 @@
     <div id="trendWrap"></div>
     <table class="tv hidden" id="tvTrend"></table>
   </div>
+</div>
+
+<div class="card hidden" id="locCard" style="margin-bottom:16px">
+  <div class="chead">
+    <h2>Confronto tra sedi</h2>
+    <button class="tgl" data-tv="tvLocs" type="button">⊞ tabella</button>
+  </div>
+  <div class="sub" style="margin-bottom:10px">Ogni riga è una sede del gruppo:
+    barra = mix di sentiment, a destra rating medio e volume. Clicca per isolarla.</div>
+  <div id="locWrap"></div>
+  <div class="legend">
+    <span class="key"><span class="sw" style="background:var(--pos)"></span>Positive</span>
+    <span class="key"><span class="sw" style="background:var(--neg)"></span>Negative</span>
+    <span class="key"><span class="sw" style="background:var(--neu)"></span>Neutre</span>
+  </div>
+  <table class="tv hidden" id="tvLocs"></table>
 </div>
 
 <div class="card" style="margin-bottom:16px">
@@ -391,7 +409,9 @@ const MS_DAY = 864e5;
 const NOW = new Date(DATA.generated_ts);
 
 /* ---------------- stato filtri (persistente: sopravvive ai refresh) ---------------- */
-const state = { period:"all", source:"all", sent:"all", topic:"all", search:"", shown:20, sort:"new", hideEmpty:false };
+const state = { period:"all", source:"all", sent:"all", topic:"all", loc:"all", search:"", shown:20, sort:"new", hideEmpty:false };
+const LOCS = [...new Set(DATA.feedback.map(f=>f.loc).filter(Boolean))].sort();
+const IS_GROUP = LOCS.length > 1;
 const STATE_KEY = "ekko_state_" + (DATA.business_id || "x");
 try {
   const saved = JSON.parse(sessionStorage.getItem(STATE_KEY) || "null");
@@ -411,6 +431,7 @@ function filtered(){
     (state.source==="all" || f.s===state.source) &&
     (state.sent==="all" || sentClass(f)===state.sent) &&
     (state.topic==="all" || f.topics.includes(state.topic)) &&
+    (state.loc==="all" || f.loc===state.loc) &&
     (!q || (f.txt||"").toLowerCase().includes(q)));
 }
 
@@ -640,6 +661,83 @@ function domSent(o){
   return "--neu";
 }
 
+/* ---------------- confronto sedi (vista di gruppo) ---------------- */
+function renderLocations(rows){
+  const card=document.getElementById("locCard");
+  if(!IS_GROUP){ card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+  const wrap=document.getElementById("locWrap"); wrap.replaceChildren();
+  /* sempre su TUTTE le sedi: il confronto perde senso se filtrato per sede */
+  const base = state.loc==="all" ? rows : filteredIgnoringLoc();
+  const agg=new Map();
+  base.forEach(f=>{
+    const k=f.loc||"—";
+    const o=agg.get(k)||{pos:0,neu:0,neg:0,tot:0,stars:0,rep:0};
+    o[sentClass(f)]++; o.tot++; o.stars+=f.st; if(f.rep) o.rep++;
+    agg.set(k,o);
+  });
+  const locs=[...agg.entries()].sort((a,b)=>b[1].tot-a[1].tot);
+  if(!locs.length){ wrap.innerHTML='<div class="empty">Nessuna recensione nel filtro.</div>'; return; }
+  const maxTot=Math.max(...locs.map(([,o])=>o.tot));
+  locs.forEach(([name,o])=>{
+    const row=document.createElement("div");
+    row.className="topic-row"+(state.loc===name?" sel":"");
+    row.setAttribute("tabindex","0"); row.setAttribute("role","button");
+    const avg=o.tot? o.stars/o.tot : 0;
+    row.setAttribute("aria-label",
+      `${name}: ${o.tot} recensioni, media ${avg.toFixed(2)} stelle`);
+    const nm=document.createElement("div"); nm.className="tn";
+    nm.textContent=name; row.appendChild(nm);
+    const svgNS="http://www.w3.org/2000/svg";
+    const W=480,H=26,USABLE=W-96;
+    const svg=document.createElementNS(svgNS,"svg");
+    svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width","100%");
+    const scale=v=>maxTot? (v/maxTot)*USABLE : 0;
+    let x=0;
+    [[o.pos,"--pos"],[o.neg,"--neg"],[o.neu,"--neu"]].forEach(([v,varName])=>{
+      const w=scale(v); if(w<=0) return;
+      const r=document.createElementNS(svgNS,"rect");
+      const px=Math.max(2,w-2);
+      r.setAttribute("x",x); r.setAttribute("y",4);
+      r.setAttribute("width",px); r.setAttribute("height",18);
+      r.setAttribute("rx","4"); r.setAttribute("fill",css(varName));
+      svg.appendChild(r);
+      if(px>=30){ const tl=document.createElementNS(svgNS,"text");
+        tl.setAttribute("x",x+px/2); tl.setAttribute("y",17);
+        tl.setAttribute("text-anchor","middle"); tl.setAttribute("font-size","10");
+        tl.setAttribute("font-weight","600"); tl.setAttribute("fill","#fff");
+        tl.textContent=fmt(v); svg.appendChild(tl); }
+      x+=w;
+    });
+    const lbl=document.createElementNS(svgNS,"text");
+    lbl.setAttribute("x",x+8); lbl.setAttribute("y",17);
+    lbl.setAttribute("font-size","10"); lbl.setAttribute("fill",css("--ink-2"));
+    lbl.textContent=`★ ${avg.toFixed(2)} · ${fmt(o.tot)}`;
+    svg.appendChild(lbl);
+    row.appendChild(svg);
+    const show=e=>ttShow(e,[
+      [name, `★ ${avg.toFixed(2)} · ${fmt(o.tot)} recensioni`, null],
+      ["positive", fmt(o.pos), css("--pos")],
+      ["negative", fmt(o.neg), css("--neg")],
+      ["risposte", Math.round(o.rep/o.tot*100)+"%", null]]);
+    row.addEventListener("pointermove",show);
+    row.addEventListener("pointerleave",ttHide);
+    const act=()=>setFilter("loc", state.loc===name?"all":name);
+    row.addEventListener("click",act);
+    row.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();act();} });
+    wrap.appendChild(row);
+  });
+  fillTable("tvLocs",["Sede","Recensioni","Rating medio","Positive","Neutre","Negative","Risposte"],
+    locs.map(([n,o])=>[n,fmt(o.tot),(o.stars/o.tot).toFixed(2),fmt(o.pos),
+      fmt(o.neu),fmt(o.neg),Math.round(o.rep/o.tot*100)+"%"]),[1,2,3,4,5,6]);
+}
+
+/* stesse regole di filtered() ma SENZA il filtro sede */
+function filteredIgnoringLoc(){
+  const keep=state.loc; state.loc="all";
+  const rows=filtered(); state.loc=keep; return rows;
+}
+
 /* ---------------- analisi tematica: bolle (stile Glanceable) ---------------- */
 function renderBubbles(rows){
   const wrap=document.getElementById("bubbleWrap"); wrap.replaceChildren();
@@ -842,7 +940,8 @@ function renderReviews(rows){
     dot.style.background=css(SOURCE_SLOT[f.s]||"--s1");
     dot.style.borderRadius="50%"; dot.style.width="8px"; dot.style.height="8px";
     const src=document.createElement("span");
-    src.textContent=(SOURCE_LABELS[f.s]||f.s)+" · "+f.d.slice(0,10);
+    src.textContent=(SOURCE_LABELS[f.s]||f.s)+" · "+f.d.slice(0,10)
+      +(f.loc?" · "+f.loc:"");
     meta.append(dot,src);
     if(f.rep){ const b=document.createElement("span"); b.className="badge rep";
       b.textContent="✓ risposta inviata"; meta.appendChild(b); }
@@ -1097,7 +1196,7 @@ function renderAnalysis(rows, ai){
 function renderAll(){
   const rows=filtered();
   renderKpis(rows); renderDonut(rows); renderTrend(rows);
-  renderBubbles(rows); renderTopics(rows); renderReviews(rows);
+  renderLocations(rows); renderBubbles(rows); renderTopics(rows); renderReviews(rows);
   syncControls();
   /* analisi eseguita su filtri diversi da quelli correnti → avviso */
   const stale=document.getElementById("staleNote");
@@ -1109,6 +1208,7 @@ function syncControls(){
   document.getElementById("fSource").value=state.source;
   document.getElementById("fSent").value=state.sent;
   document.getElementById("fTopic").value=state.topic;
+  const lf=document.getElementById("fLoc"); if(lf) lf.value=state.loc;
 }
 
 /* popolamento select */
@@ -1129,6 +1229,14 @@ function syncControls(){
   document.getElementById("revSort").value=state.sort;
   document.getElementById("revHideEmpty").checked=state.hideEmpty;
   document.getElementById("fSearch").value=state.search;
+  const locSel=document.getElementById("fLoc");
+  if(IS_GROUP){
+    document.getElementById("locFilterWrap").classList.remove("hidden");
+    LOCS.forEach(l=>{ const o=document.createElement("option");
+      o.value=l; o.textContent=l; locSel.appendChild(o); });
+    if(![...locSel.options].some(o=>o.value===state.loc)) state.loc="all";
+    locSel.addEventListener("change",e=>setFilter("loc",e.target.value));
+  } else { state.loc="all"; }
   document.getElementById("fPeriod").addEventListener("change",e=>setFilter("period",e.target.value));
   srcSel.addEventListener("change",e=>setFilter("source",e.target.value));
   document.getElementById("fSent").addEventListener("change",e=>setFilter("sent",e.target.value));
@@ -1137,7 +1245,7 @@ function syncControls(){
   document.getElementById("fSearch").addEventListener("input",e=>{
     clearTimeout(deb); deb=setTimeout(()=>setFilter("search",e.target.value),200); });
   document.getElementById("fReset").addEventListener("click",()=>{
-    Object.assign(state,{period:"all",source:"all",sent:"all",topic:"all",search:"",shown:20});
+    Object.assign(state,{period:"all",source:"all",sent:"all",topic:"all",loc:"all",search:"",shown:20});
     document.getElementById("fSearch").value=""; renderAll(); });
   document.getElementById("moreBtn").addEventListener("click",()=>{
     state.shown+=30; renderAll(); });
@@ -1145,8 +1253,8 @@ function syncControls(){
   document.getElementById("revHideEmpty").addEventListener("change",e=>{state.hideEmpty=e.target.checked;persistState();renderAll();});
   document.getElementById("revCsv").addEventListener("click",()=>{
     const rows=filtered(); const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
-    const head=["data","fonte","stelle","risposta","temi","testo"];
-    const lines=[head.join(",")].concat(rows.map(f=>[f.d.slice(0,10),f.s,f.st,f.rep?"si":"no",
+    const head=["data","fonte","sede","stelle","risposta","temi","testo"];
+    const lines=[head.join(",")].concat(rows.map(f=>[f.d.slice(0,10),f.s,f.loc||"",f.st,f.rep?"si":"no",
       (f.topics||[]).join("|"),f.txt||""].map(esc).join(",")));
     const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8"});
     const a=document.createElement("a"); a.href=URL.createObjectURL(blob);

@@ -154,8 +154,9 @@ def _auth_header() -> dict:
             "Content-Type": "application/json"}
 
 
-def post_task(business: BusinessRef) -> str | None:
-    """Posta il task recensioni Google (priority) e ritorna il task_id."""
+def post_task(business: BusinessRef, keyword_override: str | None = None) -> str | None:
+    """Posta il task recensioni Google (priority) e ritorna il task_id.
+    keyword_override: nome di UNA sede specifica (gruppi multi-sede)."""
     if not os.environ.get("DATAFORSEO_AUTH"):
         return None
     depth = business.review_depth or DEPTH
@@ -164,7 +165,8 @@ def post_task(business: BusinessRef) -> str | None:
     # ("ChIJ…") che risolviamo noi: il task fallirebbe restituendo 0 recensioni.
     # Si usa invece il NOME ESATTO della scheda confermata nello step di
     # identificazione (google_match_name), che è già disambiguato.
-    keyword = (business.google_match_name or business.name).strip()
+    keyword = (keyword_override or business.google_match_name
+               or business.name).strip()
     if business.city and business.city.lower() not in keyword.lower():
         keyword = f"{keyword} {business.city}".strip()
     task = {"language_code": "it", "depth": depth, "priority": 2,
@@ -222,11 +224,19 @@ def collect(task_id: str, expect_name: str | None = None):
         return None, None
 
 
-def normalize_items(items: list, business: BusinessRef, run: ConnectorRun):
-    """Converte gli item DataForSEO in FeedbackObject."""
+def normalize_items(items: list, business: BusinessRef, run: ConnectorRun,
+                    location: str | None = None):
+    """Converte gli item DataForSEO in FeedbackObject.
+    location: etichetta della sede (gruppi multi-sede)."""
     conn = DataForSeoGoogleConnector()
     for item in items:
         fo = conn._normalize(item, business, run)
         if fo is not None:
+            if location:
+                fo.location = location
+                # id/dedup per sede: due sedi possono avere id nativi uguali
+                fo.source_native_id = f"{location}|{fo.source_native_id}"
+                fo.id = make_feedback_id("google", business.id,
+                                         fo.source_native_id)
             run.fetched += 1
             yield fo

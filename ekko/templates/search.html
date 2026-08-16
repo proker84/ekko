@@ -354,7 +354,8 @@ function renderMatch(j){
     const box=document.createElement("div"); box.className="msrc";
     const head=document.createElement("div"); head.className="mh";
     const nm=document.createElement("b"); nm.textContent=src.label;
-    head.appendChild(nm);
+    const sc=document.createElement("span"); sc.className="selcount"; sc.textContent="";
+    head.append(nm, sc);
     const top=src.candidates[0];
     if(top){ const cb=document.createElement("span");
       cb.className="conf "+confClass(top.conf);
@@ -364,16 +365,38 @@ function renderMatch(j){
     box.appendChild(body);
     list.appendChild(box);
 
-    const choose=(token)=>{ msel[src.key]={resolved:true, token}; refreshGo();
-      body.querySelectorAll(".cand").forEach(c=>c.classList.toggle("sel",
-        c.dataset.token===String(token))); };
+    /* selezione multipla: msel[key].tokens = [] (vuoto = fonte saltata) */
+    const setSel=(tokens)=>{
+      msel[src.key]={resolved:true, tokens:tokens.slice()};
+      body.querySelectorAll(".cand").forEach(c=>{
+        const t=c.dataset.token;
+        const on = t==="__skip__" ? tokens.length===0 : tokens.includes(t);
+        c.classList.toggle("sel", on);
+        const inp=c.querySelector("input"); if(inp) inp.checked=on;
+      });
+      const badge=box.querySelector(".selcount");
+      if(badge) badge.textContent = tokens.length>1
+        ? `${tokens.length} sedi selezionate` : "";
+      refreshGo();
+    };
+    const toggle=(token, on)=>{
+      const cur=(msel[src.key] && msel[src.key].tokens) || [];
+      if(token==="__skip__"){ setSel([]); return; }
+      const next = on ? cur.concat([String(token)])
+                      : cur.filter(t=>t!==String(token));
+      setSel(next);
+    };
+    const choose=(token)=>setSel([String(token)]);
 
+    /* CHECKBOX: si possono selezionare PIÙ sedi (gruppi/catene) */
     const mkCand=(token,label,detail,checked)=>{
       const c=document.createElement("label"); c.className="cand"+(checked?" sel":"");
       c.dataset.token=String(token);
-      const r=document.createElement("input"); r.type="radio"; r.name="m_"+src.key;
+      const r=document.createElement("input");
+      r.type = token==="__skip__" ? "radio" : "checkbox";
+      if(token==="__skip__") r.name="skip_"+src.key;
       r.checked=!!checked;
-      r.addEventListener("change",()=>choose(token));
+      r.addEventListener("change",()=>toggle(token, r.checked));
       const t=document.createElement("div");
       const cl=document.createElement("div"); cl.className="cl"; cl.textContent=label;
       t.appendChild(cl);
@@ -391,41 +414,36 @@ function renderMatch(j){
         "Ricerca per nome — verifica preventiva non disponibile",
         "la piattaforma verrà interrogata con nome + città", true));
       body.appendChild(mkSkip(false));
-      msel[src.key]={resolved:true, token:"__keyword__"};
+      msel[src.key]={resolved:true, tokens:["__keyword__"]};
     } else if(!src.candidates.length){
       const n=document.createElement("div"); n.className="mnote";
       n.textContent="✗ Non trovata. "+(src.none_hint||"");
       body.appendChild(n);
       body.appendChild(mkSkip(true));
-      msel[src.key]={resolved:true, token:"__skip__"};
+      msel[src.key]={resolved:true, tokens:[]};
     } else {
       /* SEMPRE la lista dei top 3 candidati: anche al 100% serve il tuo OK
          (il via è il pulsante "Avvia analisi"). Con ≥90% pre-selezioniamo. */
       const n=document.createElement("div"); n.className="mnote";
       n.textContent = src.auto
-        ? "✓ Pre-selezionata la migliore ("+top.conf+"%). Conferma o cambia, poi dai l'OK in fondo."
-        : "Accuratezza sotto il "+(j.threshold||90)+"%: scegli tu il profilo giusto.";
+        ? "✓ Pre-selezionata la migliore ("+top.conf+"%). Puoi selezionarne PIÙ DI UNA: le sedi verranno analizzate insieme."
+        : "Seleziona una o più sedi (catene: puoi analizzarle tutte insieme).";
       body.appendChild(n);
-      /* primi 3 subito; gli altri dietro "mostra altri" (catene multi-sede) */
-      const firstN = src.candidates.slice(0,3), restN = src.candidates.slice(3);
-      firstN.forEach((cd2,i)=>body.appendChild(
+      /* TUTTI i candidati, nessun taglio: le catene hanno molte sedi */
+      src.candidates.forEach((cd2,i)=>body.appendChild(
         mkCand(cd2.token, `${cd2.label} · ${cd2.conf}%`, cd2.detail,
                src.auto && i===0)));
-      if(restN.length){
-        const more=document.createElement("button"); more.type="button";
-        more.className="mchg"; more.textContent=`▾ mostra altri ${restN.length} risultati`;
-        more.addEventListener("click",()=>{
-          more.remove();
-          restN.forEach(cd2=>body.insertBefore(
-            mkCand(cd2.token, `${cd2.label} · ${cd2.conf}%`, cd2.detail, false),
-            body.querySelector(".cand.skip")));
-        });
-        body.appendChild(more);
+      if(src.candidates.length > 1){
+        const all=document.createElement("button"); all.type="button";
+        all.className="mchg";
+        all.textContent=`⊕ seleziona tutte le ${src.candidates.length} sedi (vista di gruppo)`;
+        all.addEventListener("click",()=>setSel(src.candidates.map(c=>String(c.token))));
+        body.appendChild(all);
       }
       body.appendChild(mkSkip(false));
       msel[src.key] = src.auto
-        ? {resolved:true, token:top.token}        /* pre-scelta, OK col bottone */
-        : {resolved:false, token:null};           /* scelta obbligatoria */
+        ? {resolved:true, tokens:[String(top.token)]}
+        : {resolved:false, tokens:[]};            /* scelta obbligatoria */
     }
   });
   document.getElementById("mSpin").classList.add("hidden");
@@ -434,7 +452,11 @@ function renderMatch(j){
 
 function refreshGo(){
   const ok = matchData && matchData.sources.every(s=>msel[s.key] && msel[s.key].resolved);
-  document.getElementById("mGo").disabled = !ok;
+  const btn=document.getElementById("mGo");
+  btn.disabled = !ok;
+  const tot = matchData ? matchData.sources.reduce(
+    (a,s)=>a + ((msel[s.key]&&msel[s.key].tokens)||[]).filter(t=>t!=="__keyword__").length, 0) : 0;
+  btn.textContent = tot>1 ? `▶ Avvia analisi di gruppo (${tot} sedi)` : "▶ Avvia analisi";
 }
 
 function startSearch(){
@@ -444,19 +466,29 @@ function startSearch(){
   const skips=[];
   (matchData?matchData.sources:[]).forEach(s=>{
     const m=msel[s.key]; if(!m) return;
-    if(m.token==="__skip__"){ skips.push(s.key); return; }
-    if(m.token==="__keyword__"||m.token==null) return;
+    const tokens=(m.tokens||[]).filter(t=>t!=="__skip__");
+    if(!tokens.length){ skips.push(s.key); return; }
+    if(tokens[0]==="__keyword__") return;   /* ricerca per nome */
     if(s.key==="google"){
-      fd.set("google_place_id", m.token);
-      /* nome ESATTO della scheda scelta: è la chiave con cui DataForSEO
-         trova la sede giusta (il place_id di Places non gli è compatibile) */
-      const chosen=(s.candidates||[]).find(c=>String(c.token)===String(m.token));
-      if(chosen) fd.set("google_label", chosen.label);
+      /* nomi ESATTI delle schede scelte: chiave con cui DataForSEO trova le
+         sedi giuste (il place_id di Places non gli è compatibile) */
+      const labels=tokens.map(t=>{
+        const c=(s.candidates||[]).find(x=>String(x.token)===t);
+        return c ? c.label : null; }).filter(Boolean);
+      if(labels.length) fd.set("google_labels", JSON.stringify(labels));
+      fd.set("google_place_id", tokens[0]);
+      if(labels[0]) fd.set("google_label", labels[0]);
     }
-    else if(s.key==="tripadvisor") fd.set("tripadvisor_url_path", m.token);
-    else if(s.key==="autoscout24") fd.set("autoscout24_url", m.token);
+    else if(s.key==="tripadvisor"){
+      fd.set("tripadvisor_url_paths", JSON.stringify(tokens));
+      fd.set("tripadvisor_url_path", tokens[0]);
+    }
+    else if(s.key==="autoscout24"){
+      fd.set("autoscout24_urls", JSON.stringify(tokens));
+      fd.set("autoscout24_url", tokens[0]);
+    }
     else if(["trustpilot","feedaty","recensioni_verificate"].includes(s.key))
-      fd.set("domain", m.token);
+      fd.set("domain", tokens[0]);
   });
   fd.set("skip_sources", skips.join(","));
   showCollect(name, new Set(skips));

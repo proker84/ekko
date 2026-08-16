@@ -32,15 +32,17 @@ def _auth_header() -> dict:
             "Content-Type": "application/json"}
 
 
-def post_task(business: BusinessRef) -> str | None:
-    """Posta il task recensioni TripAdvisor e ritorna il task_id."""
+def post_task(business: BusinessRef, url_path_override: str | None = None) -> str | None:
+    """Posta il task recensioni TripAdvisor e ritorna il task_id.
+    url_path_override: scheda di UNA sede specifica (gruppi multi-sede)."""
     if not enabled():
         return None
     depth = DEPTH or min(business.review_depth or 100, 1000)
     task = {"language_code": "it", "depth": depth, "priority": 2}
-    if business.tripadvisor_url_path:
+    url_path = url_path_override or business.tripadvisor_url_path
+    if url_path:
         # pagina CONFERMATA nello step di identificazione: match esatto
-        task["url_path"] = business.tripadvisor_url_path
+        task["url_path"] = url_path
     else:
         task["keyword"] = f"{business.name} {business.city or ''}".strip()
         task["location_name"] = "Italy"
@@ -102,7 +104,8 @@ def _parse_ts(item: dict) -> datetime | None:
     return None
 
 
-def normalize_items(items: list, business: BusinessRef, run: ConnectorRun):
+def normalize_items(items: list, business: BusinessRef, run: ConnectorRun,
+                    location: str | None = None):
     """Converte gli item DataForSEO TripAdvisor in FeedbackObject."""
     for item in items:
         d = _parse_ts(item)
@@ -117,6 +120,8 @@ def normalize_items(items: list, business: BusinessRef, run: ConnectorRun):
                   or (item.get("user_profile") or {}).get("url") or "anon")
         native = item.get("review_id") or item.get("url") or \
             f"{author}|{d.isoformat()}|{value}"
+        if location:
+            native = f"{location}|{native}"
         text = item.get("review_text") or item.get("title")
         run.fetched += 1
         yield FeedbackObject(
@@ -128,6 +133,7 @@ def normalize_items(items: list, business: BusinessRef, run: ConnectorRun):
             text=text,
             rating=FeedbackObject.normalize_rating(float(value), float(vmax)),
             published_at=d,
+            location=location,
             lineage=Lineage(connector="tripadvisor_dfs", run_id=run.run_id,
                             license="licensed_provider"),
         )

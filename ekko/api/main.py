@@ -513,21 +513,55 @@ def search():
             business.review_depth = max(10, min(_d, 4490))
     except (TypeError, ValueError):
         pass
+    # GRUPPI/CATENE: liste di sedi scelte nello step di identificazione
+    def _multi(field: str) -> list[str]:
+        import json as _j
+        raw = (request.form.get(field) or "").strip()
+        if not raw:
+            return []
+        try:
+            vals = _j.loads(raw)
+            return [str(v).strip() for v in vals if str(v).strip()]
+        except ValueError:
+            return [raw]
+
+    g_labels = _multi("google_labels")
+    ta_paths = _multi("tripadvisor_url_paths")
+    as24_urls = _multi("autoscout24_urls")
+    if as24_urls:
+        business.autoscout24_urls = as24_urls
+        business.autoscout24_url = as24_urls[0]
     save_business(business, owner_id=owner)
+
     from ekko.connectors import dataforseo as _dfs
     from ekko.connectors import tripadvisor_dfs as _ta
-    # 1) task asincroni DataForSEO (Google + TripAdvisor): partono in background
+    # 1) task asincroni DataForSEO: UNO PER SEDE (Google + TripAdvisor)
     if _dfs.enabled() and "google" not in skips:
-        tid = _dfs.post_task(business)
-        if tid:
-            business.dfs_task_id = tid
+        labels = g_labels or [business.google_match_name or business.name]
+        multi = len(labels) > 1
+        for lbl in labels:
+            tid = _dfs.post_task(business, keyword_override=lbl)
+            if tid:
+                business.dfs_tasks.append({
+                    "id": tid, "label": lbl if multi else None,
+                    "pending": True, "total": None, "retried": False})
+        if business.dfs_tasks:
+            business.dfs_task_id = business.dfs_tasks[0]["id"]   # compat
             business.dfs_pending = True
     if _ta.enabled() and "tripadvisor" not in skips:
-        ta_tid = _ta.post_task(business)
-        if ta_tid:
-            business.ta_task_id = ta_tid
+        paths = ta_paths or ([business.tripadvisor_url_path]
+                             if business.tripadvisor_url_path else [None])
+        multi_ta = len([p for p in paths if p]) > 1
+        for p in paths:
+            ta_tid = _ta.post_task(business, url_path_override=p)
+            if ta_tid:
+                business.ta_tasks.append({
+                    "id": ta_tid, "label": (p or "")[:60] if multi_ta else None,
+                    "pending": True, "total": None})
+        if business.ta_tasks:
+            business.ta_task_id = business.ta_tasks[0]["id"]     # compat
             business.ta_pending = True
-    if business.dfs_pending or business.ta_pending:
+    if business.dfs_tasks or business.ta_tasks:
         save_business(business)
     # 2) fonti veloci subito (scraper/API), escluse quelle saltate dall'utente
     fast = [c for c in default_connectors()
@@ -595,38 +629,61 @@ def get_score(business_id: str):
 
 
 def _collect_dfs_if_ready(business_id: str) -> dict:
-    """Ingerisce i task DataForSEO (Google e TripAdvisor) se pronti."""
+    """Ingerisce i task DataForSEO pronti — UNO PER SEDE (gruppi/catene)."""
     from ekko.connectors import dataforseo as _dfs
     from ekko.connectors import tripadvisor_dfs as _ta
     from ekko.connectors.base import ConnectorRun
     from ekko.core.sentiment import enrich_stage0
     payload = db.get_business_payload(business_id) or {}
-    for pend_key, task_key, mod, total_attr in (
-            ("dfs_pending", "dfs_task_id", _dfs, "total_reviews_google"),
-            ("ta_pending", "ta_task_id", _ta, "total_reviews_tripadvisor")):
-        if payload.get(pend_key) and payload.get(task_key):
-            items, total = mod.collect(payload[task_key],
-                                       expect_name=payload.get("name"))
-            if items is not None:  # task pronto -> ingerisci
-                biz = BusinessRef.model_validate(payload)
-                run = ConnectorRun()
-                for fo in mod.normalize_items(items, biz, run):
-                    db.insert_feedback(enrich_stage0(fo))
-                setattr(biz, pend_key, False)
-                if total:
-                    setattr(biz, total_attr, int(total))
-                # AUTO-RECUPERO: task andato a vuoto (0 recensioni) -> un solo
-                # nuovo tentativo con il nome "grezzo", senza qualificatori.
-                if (mod is _dfs and run.fetched == 0 and not biz.dfs_retried
-                        and biz.google_match_name):
-                    biz.dfs_retried = True
-                    biz.google_match_name = None      # torna al nome cercato
-                    new_tid = _dfs.post_task(biz)
-                    if new_tid:
-                        biz.dfs_task_id = new_tid
-                        biz.dfs_pending = True
-                db.upsert_business(biz)
-                payload = db.get_business_payload(business_id) or payload
+    biz = BusinessRef.model_validate(payload)
+    changed = False
+
+    for tasks_attr, pend_attr, mod, total_attr in (
+            ("dfs_tasks", "dfs_pending", _dfs, "total_reviews_google"),
+            ("ta_tasks", "ta_pending", _ta, "total_reviews_tripadvisor")):
+        tasks = getattr(biz, tasks_attr) or []
+        # compat: business creati prima del multi-sede
+        if not tasks and getattr(biz, pend_attr) and \
+                getattr(biz, "dfs_task_id" if mod is _dfs else "ta_task_id"):
+            tasks = [{"id": getattr(biz, "dfs_task_id" if mod is _dfs
+                                    else "ta_task_id"),
+                      "label": None, "pending": True, "total": None,
+                      "retried": False}]
+            setattr(biz, tasks_attr, tasks)
+            changed = True
+        grand_total = 0
+        for t in tasks:
+            if not t.get("pending"):
+                grand_total += t.get("total") or 0
+                continue
+            items, total = mod.collect(t["id"], expect_name=biz.name)
+            if items is None:            # ancora in coda
+                continue
+            run = ConnectorRun()
+            for fo in mod.normalize_items(items, biz, run,
+                                          location=t.get("label")):
+                db.insert_feedback(enrich_stage0(fo))
+            t["pending"] = False
+            t["total"] = int(total) if total else 0
+            grand_total += t["total"]
+            changed = True
+            # AUTO-RECUPERO Google: sede andata a vuoto -> un solo nuovo
+            # tentativo con il nome "grezzo" dell'azienda.
+            if (mod is _dfs and run.fetched == 0 and not t.get("retried")
+                    and t.get("label")):
+                t["retried"] = True
+                new_tid = _dfs.post_task(biz, keyword_override=biz.name)
+                if new_tid:
+                    t.update(id=new_tid, pending=True, total=None)
+        if grand_total:
+            setattr(biz, total_attr, grand_total)
+        still = any(t.get("pending") for t in tasks)
+        if getattr(biz, pend_attr) != still:
+            setattr(biz, pend_attr, still)
+            changed = True
+    if changed:
+        db.upsert_business(biz)
+        payload = db.get_business_payload(business_id) or payload
     return payload
 
 
@@ -719,6 +776,7 @@ def render_dashboard(business_name: str, breakdown, feedback,
                 "sent": f.enrichment.sentiment if f.enrichment.sentiment is not None else 0,
                 "topics": f.enrichment.topics,
                 "rep": f.reply is not None,
+                "loc": f.location,          # sede (gruppi multi-sede)
                 "txt": f.text,
             }
             for f in feedback

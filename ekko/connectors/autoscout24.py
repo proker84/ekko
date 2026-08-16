@@ -142,9 +142,23 @@ class AutoScout24Connector(BaseConnector):
         self._check_kill_switch()
         if not enabled():
             return
-        url = resolve_url(business)
-        if not url:
-            return
+        # gruppi/catene: più concessionari analizzati insieme
+        urls = [u for u in (business.autoscout24_urls or []) if u] or \
+            [resolve_url(business)]
+        for url in urls:
+            if not url:
+                continue
+            u = url.rstrip("/")
+            if not u.endswith("/recensioni"):
+                u += "/recensioni"
+            label = u.split("/concessionari/")[-1].replace("/recensioni", "") \
+                if "/concessionari/" in u else None
+            yield from self._fetch_one(u, business, since, run,
+                                       label if len(urls) > 1 else None)
+
+    def _fetch_one(self, url: str, business: BusinessRef,
+                   since: datetime | None, run: ConnectorRun,
+                   location: str | None) -> Iterator[FeedbackObject]:
         try:
             reviews, _method = scrape_all(url)
         except httpx.HTTPError:
@@ -154,6 +168,8 @@ class AutoScout24Connector(BaseConnector):
                 continue
             native = rv.get("native_id") or \
                 f"{rv['author']}|{rv['date'].isoformat()}|{rv['stars']}"
+            if location:
+                native = f"{location}|{native}"
             run.fetched += 1
             yield FeedbackObject(
                 id=make_feedback_id("autoscout24", business.id, native),
@@ -164,6 +180,7 @@ class AutoScout24Connector(BaseConnector):
                 text=rv["text"],
                 rating=FeedbackObject.normalize_rating(rv["stars"], rv["scale_max"]),
                 published_at=rv["date"],
+                location=location,
                 reply=Reply(text=rv["reply"]) if rv.get("reply") else None,
                 lineage=Lineage(connector=self.source_name, run_id=run.run_id,
                                 license="public_crawl"),
