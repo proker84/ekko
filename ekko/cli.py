@@ -76,6 +76,25 @@ def run_tptest(domain: str) -> None:
         print("\n✗ Nessuna recensione estratta. Vedi 'hint'/'error' qui sopra.")
 
 
+def run_fbtest(url: str) -> None:
+    """Diagnostica il connettore Facebook via provider (nessun login cliente).
+      python -m ekko.cli fbtest https://www.facebook.com/nomepagina
+    """
+    import json as _json
+    from ekko.connectors.facebook_public import diagnose
+    if not url:
+        print("Uso: python -m ekko.cli fbtest <url pagina facebook>")
+        return
+    print(f"Test raccolta Facebook (provider dati) su: {url}\n")
+    result = diagnose(url)
+    print(_json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    if result.get("ok"):
+        print(f"\n✓ Funziona: {result['normalizzate']} recensioni "
+              f"in ~{result['secondi']}s.")
+    else:
+        print("\n✗ Non riuscito. Vedi 'error' qui sopra.")
+
+
 def run_dfstest(keyword: str) -> None:
     """Diagnostica DataForSEO: posta un task Google Reviews e mostra la
     risposta esatta (status_code/status_message) + il risultato al polling.
@@ -137,6 +156,8 @@ if __name__ == "__main__":
         run_as24test(" ".join(sys.argv[2:]) or "autosport-snc")
     elif cmd == "tptest":
         run_tptest(sys.argv[2] if len(sys.argv) > 2 else "unieuro.it")
+    elif cmd == "fbtest":
+        run_fbtest(sys.argv[2] if len(sys.argv) > 2 else "")
     elif cmd == "dfstest":
         run_dfstest(" ".join(sys.argv[2:]) or "Eataly Milano")
     else:

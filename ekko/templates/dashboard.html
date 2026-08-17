@@ -76,6 +76,17 @@
   .tile-hero .lbl { color:rgba(255,255,255,.78); }
   .tile-hero .val { color:#fff; font-size:30px; }
   .tile-hero .note { color:rgba(255,255,255,.66); }
+  .tile.clickable-tile { cursor:pointer; transition:border-color .15s; }
+  .tile.clickable-tile:hover { border-color:var(--critical); }
+  .tile.clickable-tile.on { border-color:var(--critical); box-shadow:0 0 0 1px var(--critical); }
+  .tile .lbl { display:flex; align-items:center; gap:6px; }
+  /* icona "come si calcola" */
+  .info { display:inline-flex; align-items:center; justify-content:center;
+    width:15px; height:15px; border-radius:50%; border:1px solid var(--ink-3);
+    color:var(--ink-3); font-size:10px; font-weight:700; cursor:help;
+    flex:none; line-height:1; }
+  .info:hover { border-color:var(--s1); color:var(--s1); }
+  .hero-head { display:flex; align-items:flex-start; gap:8px; }
   /* ---------- chart cards ---------- */
   .grid2 { display:grid; grid-template-columns:minmax(260px,1fr) minmax(340px,1.6fr);
     gap:16px; margin-bottom:16px; }
@@ -234,7 +245,11 @@
 
 <div class="card hero">
   <div>
-    <div class="num" id="heroScore">{{ score.score }}<small>/100</small></div>
+    <div class="hero-head">
+      <div class="num" id="heroScore">{{ score.score }}<small>/100</small></div>
+      <span class="info" id="scoreInfo" tabindex="0" role="button"
+            aria-label="Come è composto l'Ekko Score">i</span>
+    </div>
     <div class="sub">Ekko Score · formula v{{ score.version }} · score complessivo (non filtrato)</div>
   </div>
   <div class="comp"><div class="lbl"><span>Qualità recensioni</span><span>{{ '%.0f' % score.base_component }}</span></div>
@@ -309,22 +324,6 @@
 
 <div class="card" style="margin-bottom:16px">
   <div class="chead">
-    <h2>Analisi tematica</h2>
-    <button class="tgl" data-tv="tvBubbles" type="button">⊞ tabella</button>
-  </div>
-  <div class="sub" style="margin-bottom:6px">La dimensione della bolla è il numero di
-    menzioni, il colore il sentiment dominante. Clicca una bolla per filtrare tutta la dashboard.</div>
-  <div id="bubbleWrap"></div>
-  <div class="legend">
-    <span class="key"><span class="sw" style="background:var(--pos)"></span>Prevalenza positiva</span>
-    <span class="key"><span class="sw" style="background:var(--neg)"></span>Prevalenza negativa</span>
-    <span class="key"><span class="sw" style="background:var(--neu)"></span>Prevalenza neutra</span>
-  </div>
-  <table class="tv hidden" id="tvBubbles"></table>
-</div>
-
-<div class="card" style="margin-bottom:16px">
-  <div class="chead">
     <h2>Sentiment per tema</h2>
     <button class="tgl" data-tv="tvTopics" type="button">⊞ tabella</button>
   </div>
@@ -375,7 +374,9 @@
 </div>
 
 <div class="card">
-  <div class="chead"><h2>Recensioni <span class="sub" id="revCount"></span></h2>
+  <div class="chead"><h2>Recensioni <span class="sub" id="revCount"></span>
+      <span class="badge urg hidden" id="todoBadge" style="margin-left:8px;cursor:pointer"
+            role="button" tabindex="0">⚠ solo da gestire · ✕</span></h2>
     <div class="rev-tools">
       <select id="revSort">
         <option value="new">Più recenti</option>
@@ -409,13 +410,22 @@ const MS_DAY = 864e5;
 const NOW = new Date(DATA.generated_ts);
 
 /* ---------------- stato filtri (persistente: sopravvive ai refresh) ---------------- */
-const state = { period:"all", source:"all", sent:"all", topic:"all", loc:"all", search:"", shown:20, sort:"new", hideEmpty:false };
+const state = { period:"all", source:"all", sent:"all", topic:"all", loc:"all", search:"", shown:20, sort:"new", hideEmpty:false, todo:false };
 const LOCS = [...new Set(DATA.feedback.map(f=>f.loc).filter(Boolean))].sort();
 const IS_GROUP = LOCS.length > 1;
 const STATE_KEY = "ekko_state_" + (DATA.business_id || "x");
+const REFRESH_KEY = "ekko_autorefresh_" + (DATA.business_id || "x");
+/* All'APERTURA la dashboard parte SEMPRE senza filtri (tutto lo storico,
+   tutte le fonti/sedi/temi). I filtri si conservano solo quando è la pagina
+   stessa a ricaricarsi per l'arrivo di nuove recensioni. */
 try {
-  const saved = JSON.parse(sessionStorage.getItem(STATE_KEY) || "null");
-  if (saved) Object.assign(state, saved);
+  if (sessionStorage.getItem(REFRESH_KEY) === "1") {
+    sessionStorage.removeItem(REFRESH_KEY);
+    const saved = JSON.parse(sessionStorage.getItem(STATE_KEY) || "null");
+    if (saved) Object.assign(state, saved);
+  } else {
+    sessionStorage.removeItem(STATE_KEY);   // apertura pulita
+  }
 } catch(_) {}
 function persistState(){
   try { sessionStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch(_) {}
@@ -432,6 +442,7 @@ function filtered(){
     (state.sent==="all" || sentClass(f)===state.sent) &&
     (state.topic==="all" || f.topics.includes(state.topic)) &&
     (state.loc==="all" || f.loc===state.loc) &&
+    (!state.todo || (f.st<=2 && !f.rep && !!(f.txt && f.txt.trim()))) &&
     (!q || (f.txt||"").toLowerCase().includes(q)));
 }
 
@@ -460,33 +471,93 @@ function ttMove(evt){
 function ttHide(){ tt.style.opacity=0; }
 
 /* ---------------- KPI ---------------- */
+const hasText = f => !!(f.txt && f.txt.trim());
+
 function renderKpis(rows){
   const el = document.getElementById("kpis"); el.replaceChildren();
   const n = rows.length;
   const avg = n ? rows.reduce((a,f)=>a+f.st,0)/n : 0;
-  const rep = n ? rows.filter(f=>f.rep).length/n : 0;
-  const crit = rows.filter(f=>f.st<=2 && !f.rep).length;
+  /* Tasso di risposta: SOLO sulle recensioni con testo — a una recensione
+     di sole stelle non c'è nulla da rispondere. Nessun testo => 100%. */
+  const answerable = rows.filter(hasText);
+  const answered = answerable.filter(f=>f.rep).length;
+  const rep = answerable.length ? answered/answerable.length : 1;
+  /* Stessa logica per le critiche "da gestire": solo quelle con testo */
+  const critRows = rows.filter(f=>f.st<=2 && !f.rep && hasText(f));
+  const crit = critRows.length;
   const tiles = [];
   if (DATA.total_reviews)
     tiles.push(["Recensioni totali · Google", fmt(DATA.total_reviews),
       fmt(DATA.feedback.length)+" analizzate", null, true]);
   tiles.push(
     ["Recensioni nel periodo", fmt(n), null, null],
-    ["Rating medio", n? avg.toFixed(2)+" / 5" : "—", null, null],
-    ["Tasso di risposta", n? Math.round(rep*100)+"%" : "—",
-      rep<0.3&&n? "sotto il target 60%":"", rep<0.3?"neg":"" ],
+    ["Rating medio", n? avg.toFixed(2)+" / 5" : "—", null, null, false,
+      ["Rating medio",
+       "Media aritmetica delle stelle di TUTTE le recensioni nel filtro corrente "
+       + `(${fmt(n)} recensioni), incluse quelle di sole stelle senza testo.`,
+       "Non è ponderata: ogni recensione pesa uguale. L'Ekko Score invece pesa "
+       + "le fonti e dà più valore alle recensioni recenti."]],
+    ["Tasso di risposta", answerable.length? Math.round(rep*100)+"%" : "100%",
+      answerable.length ? `su ${fmt(answerable.length)} con testo` : "nessuna da rispondere",
+      rep<0.6&&answerable.length?"neg":"", false,
+      ["Tasso di risposta",
+       `${fmt(answered)} risposte su ${fmt(answerable.length)} recensioni CON TESTO.`,
+       "Le recensioni di sole stelle sono escluse dal calcolo: non c'è nulla a "
+       + "cui rispondere. Target consigliato: 60%."]],
     ["Critiche senza risposta", fmt(crit),
-      crit>0?"recensioni ≤2★ da gestire":"tutto gestito", crit>0?"neg":"pos"],
+      crit>0?"≤2★ con testo · clicca per gestirle":"tutto gestito",
+      crit>0?"neg":"pos", false, null, crit>0],
   );
-  tiles.forEach(([lbl,val,note,cls,hero])=>{
-    const d=document.createElement("div"); d.className="card tile"+(hero?" tile-hero":"");
-    const l=document.createElement("div"); l.className="lbl"; l.textContent=lbl;
+  tiles.forEach(([lbl,val,note,cls,hero,info,clickable])=>{
+    const d=document.createElement("div");
+    d.className="card tile"+(hero?" tile-hero":"")
+      +(clickable?" clickable-tile":"")+(clickable&&state.todo?" on":"");
+    const l=document.createElement("div"); l.className="lbl";
+    l.appendChild(document.createTextNode(lbl));
+    if(info){
+      const ic=document.createElement("span"); ic.className="info";
+      ic.textContent="i"; ic.setAttribute("tabindex","0");
+      ic.setAttribute("aria-label","Come si calcola");
+      attachInfo(ic, info);
+      l.appendChild(ic);
+    }
     const v=document.createElement("div"); v.className="val"; v.textContent=val;
     d.append(l,v);
     if(note){ const nn=document.createElement("div");
       nn.className="note "+(cls||""); nn.textContent=note; d.appendChild(nn); }
+    if(clickable){
+      d.setAttribute("role","button"); d.setAttribute("tabindex","0");
+      const act=()=>{
+        state.todo=!state.todo; state.shown=20; persistState(); renderAll();
+        if(state.todo) document.getElementById("revList")
+          .scrollIntoView({behavior:"smooth", block:"start"});
+      };
+      d.addEventListener("click",act);
+      d.addEventListener("keydown",e=>{
+        if(e.key==="Enter"||e.key===" "){e.preventDefault();act();} });
+    }
     el.appendChild(d);
   });
+}
+
+/* tooltip "come si calcola" su icona (hover, focus, tap) */
+function attachInfo(node, [title, ...lines]){
+  const rows=[[title,"",null]].concat(lines.map(t=>["",t,null]));
+  const show=e=>{
+    tt.replaceChildren();
+    const h=document.createElement("div"); h.className="v"; h.textContent=title;
+    tt.appendChild(h);
+    lines.forEach(t=>{ const p=document.createElement("div");
+      p.className="l"; p.style.marginTop="4px"; p.textContent=t;
+      tt.appendChild(p); });
+    tt.style.opacity=1; ttMove(e);
+  };
+  node.addEventListener("pointerenter",show);
+  node.addEventListener("pointermove",ttMove);
+  node.addEventListener("pointerleave",ttHide);
+  node.addEventListener("focus",()=>show({clientX:innerWidth/2,clientY:120}));
+  node.addEventListener("blur",ttHide);
+  node.addEventListener("click",e=>{e.stopPropagation();show(e);});
 }
 
 /* ---------------- donut sentiment ---------------- */
@@ -738,118 +809,6 @@ function filteredIgnoringLoc(){
   const rows=filtered(); state.loc=keep; return rows;
 }
 
-/* ---------------- analisi tematica: bolle (stile Glanceable) ---------------- */
-function renderBubbles(rows){
-  const wrap=document.getElementById("bubbleWrap"); wrap.replaceChildren();
-  const agg=aggTopics(rows);
-  const topics=[...agg.entries()].sort((a,b)=>b[1].tot-a[1].tot).slice(0,14);
-  const totalMentions=[...agg.values()].reduce((a,o)=>a+o.tot,0);
-  if(!topics.length){ wrap.innerHTML='<div class="empty">Nessun tema nel filtro corrente.</div>';
-    fillTable("tvBubbles",["Tema","Menzioni","% sul totale","Positive","Neutre","Negative"],[],[]); return; }
-  const W=560,H=330,GAP=3;
-  /* raggi: area ∝ menzioni, scalata per riempire ~46% del riquadro */
-  const sumTot=topics.reduce((a,[,o])=>a+o.tot,0);
-  const k=Math.sqrt(0.46*W*H/(Math.PI*sumTot));
-  const items=topics.map(([t,o])=>({t,o,r:Math.max(12,k*Math.sqrt(o.tot))}));
-  /* packing: la più grande al centro, le altre a spirale nel primo punto libero */
-  const placed=[];
-  items.forEach((it,idx)=>{
-    if(!placed.length){ it.x=0; it.y=0; placed.push(it); return; }
-    let done=false;
-    for(let d=placed[0].r+it.r+GAP; d<1600 && !done; d+=5){
-      for(let j=0;j<28;j++){
-        const ang=j/28*2*Math.PI + idx*0.9;
-        const x=d*Math.cos(ang), y=d*Math.sin(ang)*0.62;   /* layout largo */
-        if(placed.every(p=>Math.hypot(p.x-x,p.y-y)>=p.r+it.r+GAP)){
-          it.x=x; it.y=y; placed.push(it); done=true; break; }
-      }
-    }
-    if(!done){ it.x=0; it.y=placed.reduce((a,p)=>Math.max(a,p.y+p.r),0)+it.r+GAP; placed.push(it); }
-  });
-  /* adatta il tutto al viewBox */
-  const minX=Math.min(...placed.map(p=>p.x-p.r)), maxX=Math.max(...placed.map(p=>p.x+p.r));
-  const minY=Math.min(...placed.map(p=>p.y-p.r)), maxY=Math.max(...placed.map(p=>p.y+p.r));
-  const s=Math.min(1,(W-8)/(maxX-minX),(H-8)/(maxY-minY));
-  const ox=W/2-s*(minX+maxX)/2, oy=H/2-s*(minY+maxY)/2;
-  const svgNS="http://www.w3.org/2000/svg";
-  const svg=document.createElementNS(svgNS,"svg");
-  svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width","100%");
-  svg.setAttribute("role","img"); svg.setAttribute("aria-label","Temi per volume di menzioni e sentiment dominante");
-  placed.forEach(p=>{
-    const cx=ox+s*p.x, cy=oy+s*p.y, r=s*p.r;
-    const varName=domSent(p.o);
-    const g=document.createElementNS(svgNS,"g");
-    g.classList.add("clickable"); g.setAttribute("tabindex","0"); g.setAttribute("role","button");
-    const pct=totalMentions?Math.round(p.o.tot/totalMentions*100):0;
-    g.setAttribute("aria-label",`${TOPIC_LABELS(p.t)}: ${p.o.tot} menzioni (${pct}%)`);
-    const c=document.createElementNS(svgNS,"circle");
-    c.setAttribute("cx",cx); c.setAttribute("cy",cy); c.setAttribute("r",r);
-    c.setAttribute("fill",css(varName));
-    c.setAttribute("stroke",css("--surface-1")); c.setAttribute("stroke-width","2");
-    if(state.topic!=="all" && state.topic!==p.t) c.setAttribute("opacity","0.35");
-    if(state.topic===p.t){ c.setAttribute("stroke",css("--ink-1")); c.setAttribute("stroke-width","2.5"); }
-    g.appendChild(c);
-    if(r>=30){
-      const fs=Math.min(13,Math.max(9,r/5));
-      const maxCh=Math.max(5,Math.floor((r*1.7)/(fs*0.62)));
-      /* spezza il nome su max 2 righe (sui separatori o sugli spazi) */
-      const parts=TOPIC_LABELS(p.t).split(/ · | /);
-      const lines=[""];
-      parts.forEach(w=>{
-        const cur=lines[lines.length-1];
-        if(!cur) lines[lines.length-1]=w;
-        else if((cur+" "+w).length<=maxCh) lines[lines.length-1]=cur+" "+w;
-        else lines.push(w);
-      });
-      const shown2=lines.slice(0,2);
-      if(lines.length>2) shown2[1]+="…";
-      shown2.forEach((ln,i)=>{
-        if(ln.length>maxCh) shown2[i]=ln.slice(0,maxCh-1)+"…";
-      });
-      const y0=cy-3-(shown2.length-1)*(fs*0.62);
-      const t1=document.createElementNS(svgNS,"text");
-      t1.setAttribute("x",cx); t1.setAttribute("text-anchor","middle");
-      t1.setAttribute("font-size",fs); t1.setAttribute("font-weight","650");
-      t1.setAttribute("fill","#fff");
-      shown2.forEach((ln,i)=>{
-        const ts=document.createElementNS(svgNS,"tspan");
-        ts.setAttribute("x",cx); ts.setAttribute("y",y0+i*(fs+2));
-        ts.textContent=ln; t1.appendChild(ts);
-      });
-      const t2=document.createElementNS(svgNS,"text");
-      t2.setAttribute("x",cx); t2.setAttribute("y",cy+13+(shown2.length-1)*3); t2.setAttribute("text-anchor","middle");
-      t2.setAttribute("font-size","11"); t2.setAttribute("fill","rgba(255,255,255,.85)");
-      t2.textContent=pct+"%";
-      g.append(t1,t2);
-    } else if(r>=17){
-      const t2=document.createElementNS(svgNS,"text");
-      t2.setAttribute("x",cx); t2.setAttribute("y",cy+4); t2.setAttribute("text-anchor","middle");
-      t2.setAttribute("font-size","10"); t2.setAttribute("fill","#fff");
-      t2.textContent=pct+"%";
-      g.appendChild(t2);
-    }
-    const show=e=>ttShow(e,[
-      [TOPIC_LABELS(p.t)+` · ${pct}%`, fmt(p.o.tot)+" menzioni", css(varName)],
-      ["positive", fmt(p.o.pos), css("--pos")],
-      ["neutre",   fmt(p.o.neu), css("--neu")],
-      ["negative", fmt(p.o.neg), css("--neg")]]);
-    g.addEventListener("pointermove",show);
-    g.addEventListener("pointerleave",ttHide);
-    g.addEventListener("focus",e=>ttShow({clientX:innerWidth/2,clientY:innerHeight/2},
-      [[TOPIC_LABELS(p.t), fmt(p.o.tot)+" menzioni", css(varName)]]));
-    g.addEventListener("blur",ttHide);
-    const act=()=>setFilter("topic", state.topic===p.t?"all":p.t);
-    g.addEventListener("click",act);
-    g.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();act();} });
-    svg.appendChild(g);
-  });
-  wrap.appendChild(svg);
-  fillTable("tvBubbles",["Tema","Menzioni","% sul totale","Positive","Neutre","Negative"],
-    topics.map(([t,o])=>[TOPIC_LABELS(t),fmt(o.tot),
-      (totalMentions?Math.round(o.tot/totalMentions*100):0)+"%",
-      fmt(o.pos),fmt(o.neu),fmt(o.neg)]),[1,2,3,4,5]);
-}
-
 /* ---------------- sentiment per tema: barre impilate ---------------- */
 function renderTopics(rows){
   const wrap=document.getElementById("topicsWrap"); wrap.replaceChildren();
@@ -917,6 +876,17 @@ function renderTopics(rows){
 function renderReviews(rows){
   const list=document.getElementById("revList"); list.replaceChildren();
   document.getElementById("revCount").textContent=`· ${fmt(rows.length)} nel filtro`;
+  const tb=document.getElementById("todoBadge");
+  if(tb){
+    tb.classList.toggle("hidden", !state.todo);
+    if(!tb.dataset.bound){
+      tb.dataset.bound="1";
+      const off=()=>{ state.todo=false; persistState(); renderAll(); };
+      tb.addEventListener("click",off);
+      tb.addEventListener("keydown",e=>{
+        if(e.key==="Enter"||e.key===" "){e.preventDefault();off();} });
+    }
+  }
   let sorted=[...rows];
   if(state.hideEmpty) sorted=sorted.filter(f=>f.txt&&f.txt.trim());
   const SORTS={ new:(a,b)=>b.d.localeCompare(a.d), old:(a,b)=>a.d.localeCompare(b.d),
@@ -1196,7 +1166,7 @@ function renderAnalysis(rows, ai){
 function renderAll(){
   const rows=filtered();
   renderKpis(rows); renderDonut(rows); renderTrend(rows);
-  renderLocations(rows); renderBubbles(rows); renderTopics(rows); renderReviews(rows);
+  renderLocations(rows); renderTopics(rows); renderReviews(rows);
   syncControls();
   /* analisi eseguita su filtri diversi da quelli correnti → avviso */
   const stale=document.getElementById("staleNote");
@@ -1245,7 +1215,7 @@ function syncControls(){
   document.getElementById("fSearch").addEventListener("input",e=>{
     clearTimeout(deb); deb=setTimeout(()=>setFilter("search",e.target.value),200); });
   document.getElementById("fReset").addEventListener("click",()=>{
-    Object.assign(state,{period:"all",source:"all",sent:"all",topic:"all",loc:"all",search:"",shown:20});
+    Object.assign(state,{period:"all",source:"all",sent:"all",topic:"all",loc:"all",search:"",shown:20,todo:false});
     document.getElementById("fSearch").value=""; renderAll(); });
   document.getElementById("moreBtn").addEventListener("click",()=>{
     state.shown+=30; renderAll(); });
@@ -1277,6 +1247,20 @@ function syncControls(){
     renderAll();   /* i colori svg sono risolti da css var a render */
   });
 })();
+/* icona "i" accanto all'Ekko Score */
+attachInfo(document.getElementById("scoreInfo"), [
+  "Ekko Score {{ score.score }}/100 — come è composto",
+  "70% Qualità recensioni: {{ '%.0f' % score.base_component }}/100 — media delle stelle "
+  + "ponderata per peso della fonte e per recency (una recensione di 6 mesi fa pesa metà), "
+  + "con correzione bayesiana sulle basse numerosità.",
+  "15% Trend 90 giorni: {{ '%.0f' % score.trend_component }}/100 — confronto fra gli ultimi "
+  + "90 giorni e i 90 precedenti (variazione {{ '%+.2f' % score.trend_delta }}★).",
+  "15% Tasso di risposta: {{ '%.0f' % score.engagement_component }}/100 — quanto il brand "
+  + "risponde alle recensioni.",
+  "Calcolato su {{ score.n_feedback }} recensioni ({{ score.n_recent_90d }} negli ultimi 90 giorni). "
+  + "Formula deterministica v{{ score.version }}, sempre su TUTTO lo storico: non cambia con i filtri.",
+]);
+
 renderAll();
 
 /* ---------------- aggiornamento automatico (senza perdere i filtri) ----------------
@@ -1294,7 +1278,11 @@ renderAll();
       if(!r.ok) return;
       const j = await r.json();
       const totalNow = (j.sources||[]).reduce((a,s)=>a+(s.count||0),0);
-      if (totalNow > DATA.feedback.length) { persistState(); location.reload(); }
+      if (totalNow > DATA.feedback.length) {
+        persistState();
+        try { sessionStorage.setItem(REFRESH_KEY, "1"); } catch(_) {}
+        location.reload();          /* ricarica conservando la vista corrente */
+      }
     }catch(_){}
   }
   setInterval(check, INTERVAL);

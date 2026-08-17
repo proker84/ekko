@@ -50,3 +50,7 @@ services:
         sync: false            # app Meta (collega pagine Facebook)
       - key: FACEBOOK_APP_SECRET
         sync: false
+      - key: BRIGHTDATA_TOKEN
+        sync: false            # Facebook senza login cliente (provider dati)
+      - key: BRIGHTDATA_FB_REVIEWS_DATASET
+        sync: false            # id dataset "Facebook reviews" (Scraper Library)

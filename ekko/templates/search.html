@@ -262,7 +262,7 @@ const ALL_SOURCES = [
 ];
 const EXPECT_MS = { google: 100000, tripadvisor: 100000, trustpilot: 9000,
                     autoscout24: 8000, feedaty: 7000, recensioni_verificate: 7000,
-                    meta: 8000 };   /* tempi attesi per la simulazione */
+                    meta: 120000 };   /* provider dati: raccolta più lenta */   /* tempi attesi per la simulazione */
 const bars = {};       /* key -> {el, fill, st, state} */
 let collectStart = 0, ticker = null;
 
@@ -494,6 +494,10 @@ function startSearch(){
     else if(s.key==="autoscout24"){
       fd.set("autoscout24_urls", JSON.stringify(tokens));
       fd.set("autoscout24_url", tokens[0]);
+    }
+    else if(s.key==="meta"){
+      fd.set("facebook_urls", JSON.stringify(tokens));
+      fd.set("facebook_url", tokens[0]);
     }
     else if(["trustpilot","feedaty","recensioni_verificate"].includes(s.key))
       fd.set("domain", tokens[0]);

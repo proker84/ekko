@@ -257,7 +257,7 @@ def health():
 @login_required
 def home():
     from ekko.connectors import (autoscout24, certified, dataforseo,
-                                 facebook, tripadvisor_dfs)
+                                 facebook, facebook_public, tripadvisor_dfs)
     gw = AIGateway()
     owner, _ = current_owner()
     tpl = _templates.get_template("search.html")
@@ -270,7 +270,8 @@ def home():
         as24_on=autoscout24.enabled(),
         feedaty_on=certified.feedaty_enabled(),
         rv_on=certified.rv_enabled(),
-        fb_on=facebook.enabled(owner),
+        fb_on=facebook_public.enabled() or facebook.enabled(owner),
+        fb_direct=facebook_public.enabled(),
         fb_connectable=facebook.connectable(),
         fb_pages=len(db.list_fb_pages(owner)) if owner else 0,
         ai_on=gw.available(),
@@ -453,6 +454,27 @@ def _match_tripadvisor(name: str, city: str | None) -> list[dict]:
     return sorted(out, key=lambda c: -c["conf"])[:10]
 
 
+def _match_facebook_public(name: str, city: str | None) -> list[dict]:
+    """Trova la pagina Facebook dell'azienda via SERP: nessun login richiesto."""
+    from ekko.core import matching
+    out = []
+    for hit in _serp_urls(f"site:facebook.com {name} {city or ''}".strip(), limit=12):
+        u = hit["url"]
+        m = re.search(r"facebook\.com/(?:pg/)?([A-Za-z0-9_.\-]+)", u)
+        if not m or m.group(1).lower() in (
+                "profile.php", "people", "groups", "events", "marketplace",
+                "watch", "photo", "share", "story.php", "permalink.php"):
+            continue
+        page_url = f"https://www.facebook.com/{m.group(1)}"
+        if any(c["token"] == page_url for c in out):
+            continue
+        label = _clean_serp_title(hit["title"])
+        out.append({"token": page_url, "label": label, "detail": page_url,
+                    "conf": matching.confidence(name, label, city,
+                                                hit["title"] + " " + u)})
+    return sorted(out, key=lambda c: -c["conf"])[:10]
+
+
 def _match_trustpilot(name: str, domain: str | None, city: str | None) -> list[dict]:
     from ekko.core import matching
     if domain:
@@ -571,8 +593,14 @@ def match():
         sources.append(pack("recensioni_verificate", "Recensioni Verificate",
                             _match_certified(name, domain, "rv"),
                             none_hint="Serve il dominio; pagina certificato non trovata"))
+    from ekko.connectors import facebook_public as _fbp
     owner_now, _ = current_owner()
-    if _fb.enabled(owner_now):
+    if _fbp.enabled():
+        # via provider dati: nessun accesso richiesto all'azienda analizzata
+        sources.append(pack("meta", "Facebook",
+                            _match_facebook_public(name, city),
+                            none_hint="Pagina Facebook non trovata per questo nome"))
+    elif _fb.enabled(owner_now):
         from ekko.storage import db as _db
         pages = _db.list_fb_pages(owner_now) if owner_now else []
         from ekko.core.matching import confidence as _conf
@@ -607,6 +635,7 @@ def search():
         google_place_id=(request.form.get("google_place_id") or "").strip() or None,
         google_match_name=(request.form.get("google_label") or "").strip() or None,
         tripadvisor_url_path=(request.form.get("tripadvisor_url_path") or "").strip() or None,
+        facebook_url=(request.form.get("facebook_url") or "").strip() or None,
         skipped_sources=sorted(skips),
     )
     try:
@@ -668,7 +697,20 @@ def search():
         if business.ta_tasks:
             business.ta_task_id = business.ta_tasks[0]["id"]     # compat
             business.ta_pending = True
-    if business.dfs_tasks or business.ta_tasks:
+    from ekko.connectors import facebook_public as _fbp
+    if _fbp.enabled() and "meta" not in skips:
+        fb_urls = _multi("facebook_urls") or ([business.facebook_url]
+                                              if business.facebook_url else [])
+        multi_fb = len(fb_urls) > 1
+        for u in fb_urls:
+            sid = _fbp.post_task(business, url_override=u)
+            if sid:
+                business.fb_tasks.append({
+                    "id": sid, "label": u.rstrip("/").split("/")[-1] if multi_fb else None,
+                    "pending": True, "total": None})
+        if business.fb_tasks:
+            business.fb_pending = True
+    if business.dfs_tasks or business.ta_tasks or business.fb_tasks:
         save_business(business)
     # 2) fonti veloci subito (scraper/API), escluse quelle saltate dall'utente
     fast = [c for c in default_connectors(owner)
@@ -745,15 +787,18 @@ def _collect_dfs_if_ready(business_id: str) -> dict:
     biz = BusinessRef.model_validate(payload)
     changed = False
 
+    from ekko.connectors import facebook_public as _fbp
     for tasks_attr, pend_attr, mod, total_attr in (
             ("dfs_tasks", "dfs_pending", _dfs, "total_reviews_google"),
-            ("ta_tasks", "ta_pending", _ta, "total_reviews_tripadvisor")):
+            ("ta_tasks", "ta_pending", _ta, "total_reviews_tripadvisor"),
+            ("fb_tasks", "fb_pending", _fbp, "total_reviews_facebook")):
         tasks = getattr(biz, tasks_attr) or []
         # compat: business creati prima del multi-sede
-        if not tasks and getattr(biz, pend_attr) and \
-                getattr(biz, "dfs_task_id" if mod is _dfs else "ta_task_id"):
-            tasks = [{"id": getattr(biz, "dfs_task_id" if mod is _dfs
-                                    else "ta_task_id"),
+        legacy_id_attr = ("dfs_task_id" if mod is _dfs
+                          else "ta_task_id" if mod is _ta else None)
+        if not tasks and legacy_id_attr and getattr(biz, pend_attr) and \
+                getattr(biz, legacy_id_attr):
+            tasks = [{"id": getattr(biz, legacy_id_attr),
                       "label": None, "pending": True, "total": None,
                       "retried": False}]
             setattr(biz, tasks_attr, tasks)
@@ -835,7 +880,13 @@ def _source_states(business_id: str, payload: dict | None = None,
         out.append({"key": "recensioni_verificate", "label": "Recensioni Verificate",
                     "state": "done", "count": counts.get("recensioni_verificate", 0),
                     "total": None})
-    if facebook.enabled(owner_id):
+    from ekko.connectors import facebook_public as _fbp
+    if _fbp.enabled():
+        out.append({"key": "meta", "label": "Facebook",
+                    "state": "running" if payload.get("fb_pending") else "done",
+                    "count": counts.get("meta", 0),
+                    "total": payload.get("total_reviews_facebook")})
+    elif facebook.enabled(owner_id):
         out.append({"key": "meta", "label": "Facebook", "state": "done",
                     "count": counts.get("meta", 0), "total": None})
     return [s for s in out if s["key"] not in skips]

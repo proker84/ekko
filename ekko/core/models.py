@@ -66,6 +66,7 @@ class BusinessRef(BaseModel):
     dfs_tasks: list[dict] = Field(default_factory=list)      # Google, una per sede
     ta_tasks: list[dict] = Field(default_factory=list)       # TripAdvisor
     autoscout24_urls: list[str] = Field(default_factory=list)  # più concessionari
+    fb_tasks: list[dict] = Field(default_factory=list)        # Facebook, una per pagina
     # TripAdvisor via DataForSEO (task asincrono separato da Google)
     ta_task_id: Optional[str] = None
     ta_pending: bool = False
@@ -76,6 +77,10 @@ class BusinessRef(BaseModel):
     autoscout24_url: Optional[str] = None
     # Facebook: id pagina di proprietà (Graph API, richiede token)
     facebook_page_id: Optional[str] = None
+    # Facebook SENZA login del cliente: URL pagina pubblica + task provider
+    facebook_url: Optional[str] = None
+    fb_pending: bool = False
+    total_reviews_facebook: Optional[int] = None
     # Fonti escluse dall'utente nello step di identificazione
     skipped_sources: list[str] = Field(default_factory=list)
 

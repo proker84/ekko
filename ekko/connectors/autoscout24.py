@@ -151,8 +151,10 @@ class AutoScout24Connector(BaseConnector):
             u = url.rstrip("/")
             if not u.endswith("/recensioni"):
                 u += "/recensioni"
-            label = u.split("/concessionari/")[-1].replace("/recensioni", "") \
-                if "/concessionari/" in u else None
+            label = None
+            if "/concessionari/" in u:
+                slug = u.split("/concessionari/")[-1].replace("/recensioni", "")
+                label = slug.replace("-", " ").title()   # etichetta leggibile
             yield from self._fetch_one(u, business, since, run,
                                        label if len(urls) > 1 else None)
 
