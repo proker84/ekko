@@ -18,7 +18,7 @@ import httpx
 
 from ekko.core.models import (BusinessRef, FeedbackObject, Lineage, Reply,
                               Source, make_feedback_id, pseudonymize_author)
-from .base import BaseConnector, ConnectorRun
+from .base import BaseConnector, ConnectorRun, google_reviews_since
 
 BASE = "https://api.dataforseo.com/v3/business_data/google/reviews"
 DEPTH = int(os.environ.get("EKKO_DATAFORSEO_DEPTH", "200"))
@@ -97,11 +97,14 @@ class DataForSeoGoogleConnector(BaseConnector):
         except Exception:
             pass
 
-        # 3) normalizza le recensioni
+        # 3) normalizza le recensioni (solo dal 2025 in poi — richiesta prodotto)
+        cutoff = google_reviews_since()
         for res in result:
             for item in (res.get("items") or []):
                 fo = self._normalize(item, business, run)
                 if fo is None:
+                    continue
+                if fo.published_at < cutoff:
                     continue
                 if since and fo.published_at <= since:
                     continue
@@ -247,11 +250,13 @@ def collect(task_id: str, expect_name: str | None = None):
 def normalize_items(items: list, business: BusinessRef, run: ConnectorRun,
                     location: str | None = None):
     """Converte gli item DataForSEO in FeedbackObject.
-    location: etichetta della sede (gruppi multi-sede)."""
+    location: etichetta della sede (gruppi multi-sede).
+    Le recensioni precedenti al cut-off (2025) vengono scartate."""
     conn = DataForSeoGoogleConnector()
+    cutoff = google_reviews_since()
     for item in items:
         fo = conn._normalize(item, business, run)
-        if fo is not None:
+        if fo is not None and fo.published_at >= cutoff:
             if location:
                 fo.location = location
                 # id/dedup per sede: due sedi possono avere id nativi uguali

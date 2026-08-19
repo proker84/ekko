@@ -55,6 +55,48 @@ Massimo 4 satisfactions, 4 dissatisfactions, 3 sezioni voice, 4 recommendations
 I suggestions sono SOLO richieste/proposte espresse dagli utenti nelle recensioni.
 Tono: diretto, operativo, italiano."""
 
+REPLY_SYSTEM_PROMPT = """Sei l'assistente risposte-recensioni di Ekko.
+Scrivi la risposta pubblica del titolare a UNA recensione Google.
+Regole tassative:
+- rispondi SOLO con il testo della risposta: niente virgolette, preamboli o note;
+- NON inventare MAI fatti, nomi, promozioni o dettagli non presenti nella recensione;
+- niente dati personali, niente promesse legali o rimborsi non richiesti;
+- rating basso (1-3): scuse sincere, presa in carico, invito al contatto diretto;
+- rating alto (4-5): ringraziamento caloroso e specifico;
+- lunghezza: 2-4 frasi, pronte da pubblicare."""
+
+# Fallback deterministico quando l'AI non è configurata: template con
+# placeholder {nome} (azienda), {autore} (recensore), {firma}.
+TEMPLATE_REPLY_HIGH = (
+    "Gentile {autore}, grazie di cuore per la recensione lasciata a {nome}! "
+    "Siamo felici che l'esperienza sia stata positiva e speriamo di "
+    "rivederla presto. {firma}")
+TEMPLATE_REPLY_LOW = (
+    "Gentile {autore}, grazie per il riscontro su {nome}. Ci dispiace che "
+    "l'esperienza non sia stata all'altezza delle aspettative: ci piacerebbe "
+    "capire meglio cosa è successo, la invitiamo a contattarci direttamente "
+    "per trovare una soluzione. {firma}")
+
+
+def template_reply(business_name: str, review_text: str | None,
+                   rating: float | None, settings: dict | None) -> str:
+    """Bozza deterministica senza AI: template + placeholder.
+
+    `rating` in scala 1..5 (None = non specificato -> variante positiva).
+    Usa `settings['template']` se il cliente ne ha definito uno; altrimenti
+    varianti per rating alto/basso. Mai fatti inventati: solo cortesia."""
+    s = settings or {}
+    template = (s.get("template") or "").strip()
+    if not template:
+        template = (TEMPLATE_REPLY_LOW if rating is not None and rating <= 3
+                    else TEMPLATE_REPLY_HIGH)
+    autore = (s.get("author") or "").strip() or "cliente"
+    firma = (s.get("signature") or "").strip() or f"Lo staff di {business_name}"
+    out = (template.replace("{nome}", business_name)
+                   .replace("{autore}", autore)
+                   .replace("{firma}", firma))
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
 
 class AIGateway:
     def __init__(self) -> None:
@@ -101,39 +143,83 @@ class AIGateway:
                 f"le {len(recent)} più recenti qui sotto):\n" + "\n".join(lines))
 
     # ------------------------------------------------------------------ #
-    def _call(self, user_prompt: str) -> str:
+    def generate_review_reply(self, business_name: str,
+                              review_text: str | None,
+                              rating: float | None,
+                              settings: dict | None) -> str:
+        """Bozza di risposta a UNA recensione (rating in scala 1..5).
+
+        Rispetta tone/language/signature/template dalle gbp_settings
+        (+ chiave opzionale 'author' col nome pubblico del recensore).
+        Senza chiave AI (o su errore) degrada al template deterministico.
+        La bozza viene SEMPRE approvata/modificata dall'utente prima
+        dell'invio: qui non si pubblica nulla."""
+        if not self.available():
+            return template_reply(business_name, review_text, rating, settings)
+        s = settings or {}
+        lines = [
+            f"Azienda: {business_name}",
+            f"Rating: {rating if rating is not None else 'non specificato'} su 5",
+            f"Autore (nome pubblico): {s.get('author') or 'non indicato'}",
+            f"Recensione: {(review_text or '(solo stelle, nessun testo)')[:1200]}",
+            f"Tono richiesto: {s.get('tone') or 'professionale e cordiale'}",
+            f"Lingua della risposta: {s.get('language') or 'it'}",
+        ]
+        if (s.get("signature") or "").strip():
+            lines.append(f"Chiudi la risposta con questa firma: {s['signature']}")
+        if (s.get("template") or "").strip():
+            lines.append("Segui questa traccia/template del cliente "
+                         "(placeholder {nome}={azienda}, {autore}, {firma}): "
+                         + s["template"])
+        lines.append("Scrivi ora la risposta pubblica del titolare.")
+        try:
+            raw = self._call("\n".join(lines), system=REPLY_SYSTEM_PROMPT,
+                             max_tokens=500, json_mode=False)
+            text = raw.strip().strip('"').strip()
+            return text or template_reply(business_name, review_text,
+                                          rating, settings)
+        except Exception:  # degrada con grazia al template deterministico
+            return template_reply(business_name, review_text, rating, settings)
+
+    # ------------------------------------------------------------------ #
+    def _call(self, user_prompt: str, system: str = SYSTEM_PROMPT,
+              max_tokens: int = 3000, json_mode: bool = True) -> str:
         if self.provider == "anthropic":
             resp = httpx.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": os.environ["ANTHROPIC_API_KEY"],
                          "anthropic-version": "2023-06-01"},
-                json={"model": self.model, "max_tokens": 3000,
-                      "system": SYSTEM_PROMPT,
+                json={"model": self.model, "max_tokens": max_tokens,
+                      "system": system,
                       "messages": [{"role": "user", "content": user_prompt}]},
                 timeout=60)
             resp.raise_for_status()
             return resp.json()["content"][0]["text"]
         if self.provider == "openai":
+            body = {"model": self.model, "max_tokens": max_tokens,
+                    "temperature": 0.2,
+                    "messages": [{"role": "system", "content": system},
+                                 {"role": "user", "content": user_prompt}]}
+            if json_mode:
+                body["response_format"] = {"type": "json_object"}
             resp = httpx.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-                json={"model": self.model, "max_tokens": 3000, "temperature": 0.2,
-                      "response_format": {"type": "json_object"},
-                      "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                                   {"role": "user", "content": user_prompt}]},
+                json=body,
                 timeout=60)
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
         if self.provider == "gemini":
+            gen_cfg = {"temperature": 0.2, "maxOutputTokens": max_tokens}
+            if json_mode:
+                gen_cfg["responseMimeType"] = "application/json"
             resp = httpx.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{self.model}:generateContent",
                 params={"key": os.environ["GEMINI_API_KEY"]},
-                json={"systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                json={"systemInstruction": {"parts": [{"text": system}]},
                       "contents": [{"parts": [{"text": user_prompt}]}],
-                      "generationConfig": {"temperature": 0.2,
-                                           "maxOutputTokens": 3000,
-                                           "responseMimeType": "application/json"}},
+                      "generationConfig": gen_cfg},
                 timeout=60)
             resp.raise_for_status()
             return resp.json()["candidates"][0]["content"]["parts"][0]["text"]

@@ -31,7 +31,8 @@ from flask import (Flask, abort, jsonify, redirect, request, session,
 from jinja2 import Environment, FileSystemLoader
 
 from ekko.ai.gateway import AIGateway
-from ekko.auth import google_oauth
+from ekko.auth import gbp_oauth, google_oauth
+from ekko.connectors import gbp as gbp_api
 from ekko.connectors.google import GoogleConnector
 from ekko.connectors.trustpilot import TrustpilotConnector
 from ekko.connectors import trustpilot_public
@@ -229,6 +230,278 @@ def auth_facebook_callback():
     return redirect("/?fb=" + str(len(pages)))
 
 
+# --------------------------------------------------------------------------
+# Google Business Profile (Fase 2): il cliente proprietario collega il suo
+# account Google, scarica TUTTE le recensioni delle sue sedi e risponde con
+# bozze AI che approva/modifica prima dell'invio (MAI invio automatico).
+# --------------------------------------------------------------------------
+@app.get("/gbp/connect")
+@login_required
+def gbp_connect():
+    """Avvia l'OAuth GBP (scope business.manage, offline+consent)."""
+    business_id = (request.args.get("business_id") or "").strip()
+    if not business_id:
+        abort(400)
+    _require_owner_of(business_id)
+    if not gbp_oauth.enabled():
+        return _auth_error("Google OAuth non configurato: servono "
+                           "GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET.")
+    state = secrets.token_urlsafe(24)
+    session["gbp_state"] = state
+    session["gbp_business"] = business_id
+    return redirect(gbp_oauth.authorization_url(_base_url(), state))
+
+
+@app.get("/gbp/callback")
+@login_required
+def gbp_callback():
+    """Callback OAuth GBP: scambia il code, salva i token per l'agenzia."""
+    owner, _ = current_owner()
+    business_id = session.pop("gbp_business", None)
+    if request.args.get("error"):
+        return _auth_error("Collegamento Google Business Profile annullato.")
+    state = request.args.get("state")
+    if not state or state != session.pop("gbp_state", None):
+        return _auth_error("Sessione scaduta: riprova a collegare il profilo.")
+    code = request.args.get("code")
+    if not code:
+        return _auth_error("Codice di autorizzazione mancante.")
+    try:
+        tok = gbp_oauth.exchange_code(_base_url(), code)
+    except Exception as e:  # noqa: BLE001
+        return _auth_error(f"Scambio del token non riuscito: {str(e)[:160]}")
+    db.upsert_oauth_token(owner, gbp_api.PROVIDER, tok.get("access_token"),
+                          tok.get("refresh_token"), tok.get("expires_at"),
+                          tok.get("scopes"), datetime.now(timezone.utc))
+    if business_id:
+        return redirect(f"/businesses/{business_id}/dashboard?gbp=connected")
+    return redirect("/?gbp=connected")
+
+
+def _gbp_not_connected():
+    return jsonify(ok=False, error="gbp_not_connected"), 409
+
+
+def _gbp_not_linked():
+    return jsonify(ok=False, error="gbp_not_linked"), 409
+
+
+@app.get("/api/gbp/status/<business_id>")
+@login_required
+def gbp_status(business_id: str):
+    """Stato GBP del business: connesso? collegato a una location? quali
+    location sono disponibili (solo se connesso e non ancora collegato)."""
+    owner = _require_owner_of(business_id)
+    is_connected = gbp_api.connected(owner)
+    link = db.get_gbp_link(business_id)
+    settings = db.get_gbp_settings(business_id)
+    locations = []
+    if is_connected and not link:
+        conn = gbp_api.GbpConnector(owner)
+        try:
+            for acc in conn.list_accounts(owner):
+                for loc in conn.list_locations(owner, acc["name"]):
+                    locations.append({
+                        "account": acc["name"],
+                        "name": loc.get("name") or "",
+                        "title": loc.get("title") or "",
+                        "address": gbp_api.format_address(loc),
+                    })
+        except Exception:  # quota 0 / token revocato: la UI mostra 0 sedi
+            locations = []
+    return jsonify(
+        connected=is_connected,
+        linked={"location": link["location_name"] if link else None,
+                "title": link["location_title"] if link else None},
+        locations=locations,
+        auto_draft=bool(settings.get("auto_draft")),
+    )
+
+
+@app.post("/api/gbp/link/<business_id>")
+@login_required
+def gbp_link(business_id: str):
+    """Collega il business Ekko a una location GBP scelta dall'utente."""
+    owner = _require_owner_of(business_id)
+    if not gbp_api.connected(owner):
+        return _gbp_not_connected()
+    payload = request.get_json(silent=True) or {}
+    account = (payload.get("account") or "").strip()
+    location = (payload.get("location") or "").strip()
+    if not account or not location:
+        return jsonify(ok=False, error="account e location obbligatori"), 400
+    db.upsert_gbp_link(business_id, account, location,
+                       (payload.get("title") or "").strip() or None,
+                       datetime.now(timezone.utc))
+    return jsonify(ok=True)
+
+
+def _gbp_link_or_none(business_id: str, owner: str):
+    """(link, errore JSON) — errore 409 se non connesso o non collegato."""
+    if not gbp_api.connected(owner):
+        return None, _gbp_not_connected()
+    link = db.get_gbp_link(business_id)
+    if not link:
+        return None, _gbp_not_linked()
+    return link, None
+
+
+@app.post("/api/gbp/sync/<business_id>")
+@login_required
+def gbp_sync(business_id: str):
+    """Scarica le recensioni della location collegata nel feedback store
+    (stesso percorso della pipeline: stadio 0 + dedup su insert)."""
+    from ekko.connectors.base import ConnectorRun
+    from ekko.core.sentiment import enrich_stage0
+    owner = _require_owner_of(business_id)
+    link, err = _gbp_link_or_none(business_id, owner)
+    if err:
+        return err
+    conn = gbp_api.GbpConnector(owner)
+    try:
+        raw = conn.fetch_reviews(owner, link["account_name"],
+                                 link["location_name"])
+    except Exception as e:  # noqa: BLE001
+        return jsonify(ok=False, error=str(e)[:200]), 502
+    run = ConnectorRun()
+    stored = duplicates = 0
+    for rv in raw:
+        fo = conn.normalize_review(rv, business_id, run)
+        if db.insert_feedback(enrich_stage0(fo)):
+            stored += 1
+        else:
+            duplicates += 1
+    return jsonify(ok=True, fetched=len(raw), stored=stored,
+                   duplicates=duplicates)
+
+
+def _gbp_review_row(rv: dict, drafts: dict) -> dict:
+    """Recensione v4 -> riga per la UI (rating 1..5, bozza se presente)."""
+    rid = gbp_api.review_native_id(rv)
+    reply = (rv.get("reviewReply") or {}).get("comment")
+    return {
+        "review_id": rid,
+        "author": (rv.get("reviewer") or {}).get("displayName")
+        or "Utente Google",
+        "rating": gbp_api.star_value(rv.get("starRating")),
+        "text": rv.get("comment") or "",
+        "published_at": rv.get("createTime") or rv.get("updateTime"),
+        "has_reply": bool(reply),
+        "reply_text": reply,
+        "draft": drafts.get(rid),
+    }
+
+
+@app.get("/api/gbp/reviews/<business_id>")
+@login_required
+def gbp_reviews(business_id: str):
+    """Recensioni LIVE da GBP (has_reply sempre aggiornato) + bozze locali.
+    ?only=unanswered filtra quelle ancora senza risposta."""
+    owner = _require_owner_of(business_id)
+    link, err = _gbp_link_or_none(business_id, owner)
+    if err:
+        return err
+    conn = gbp_api.GbpConnector(owner)
+    try:
+        raw = conn.fetch_reviews(owner, link["account_name"],
+                                 link["location_name"])
+    except Exception as e:  # noqa: BLE001
+        return jsonify(ok=False, error=str(e)[:200]), 502
+    drafts = db.list_reply_drafts(business_id)
+    rows = [_gbp_review_row(rv, drafts) for rv in raw]
+    if request.args.get("only") == "unanswered":
+        rows = [r for r in rows if not r["has_reply"]]
+    rows.sort(key=lambda r: r["published_at"] or "", reverse=True)
+    return jsonify(reviews=rows)
+
+
+@app.post("/api/gbp/draft/<business_id>/<review_id>")
+@login_required
+def gbp_draft(business_id: str, review_id: str):
+    """Genera la bozza AI per una recensione e la salva (stato 'draft').
+    La bozza NON viene mai inviata da qui: l'utente la approva/modifica."""
+    import json as _json
+    owner = _require_owner_of(business_id)
+    link, err = _gbp_link_or_none(business_id, owner)
+    if err:
+        return err
+    conn = gbp_api.GbpConnector(owner)
+    try:
+        raw = conn.fetch_reviews(owner, link["account_name"],
+                                 link["location_name"])
+    except Exception as e:  # noqa: BLE001
+        return jsonify(ok=False, error=str(e)[:200]), 502
+    rv = next((r for r in raw if gbp_api.review_native_id(r) == review_id),
+              None)
+    if rv is None:
+        return jsonify(ok=False, error="review_not_found"), 404
+    settings = db.get_gbp_settings(business_id)
+    settings["author"] = (rv.get("reviewer") or {}).get("displayName") or ""
+    name = db.get_business_name(business_id) or link.get("location_title") \
+        or business_id
+    text = AIGateway().generate_review_reply(
+        name, rv.get("comment"), gbp_api.star_value(rv.get("starRating")),
+        settings)
+    db.upsert_reply_draft(business_id, review_id,
+                          _json.dumps(rv, ensure_ascii=False), text,
+                          datetime.now(timezone.utc))
+    return jsonify(draft={"text": text, "status": "draft"})
+
+
+@app.post("/api/gbp/draft/<business_id>/<review_id>/save")
+@login_required
+def gbp_draft_save(business_id: str, review_id: str):
+    """Salva la bozza modificata dall'utente (resta in stato 'draft')."""
+    _require_owner_of(business_id)
+    payload = request.get_json(silent=True) or {}
+    text = (payload.get("text") or "").strip()
+    if not text:
+        return jsonify(ok=False, error="testo vuoto"), 400
+    db.upsert_reply_draft(business_id, review_id, None, text,
+                          datetime.now(timezone.utc))
+    return jsonify(ok=True)
+
+
+@app.post("/api/gbp/reply/<business_id>/<review_id>")
+@login_required
+def gbp_reply(business_id: str, review_id: str):
+    """Invia la risposta APPROVATA dall'utente via GBP e marca 'sent'."""
+    owner = _require_owner_of(business_id)
+    link, err = _gbp_link_or_none(business_id, owner)
+    if err:
+        return err
+    payload = request.get_json(silent=True) or {}
+    text = (payload.get("text") or "").strip()
+    if not text:
+        return jsonify(ok=False, error="testo vuoto"), 400
+    conn = gbp_api.GbpConnector(owner)
+    ok, msg = conn.send_reply(owner, link["account_name"],
+                              link["location_name"], review_id, text)
+    if not ok:
+        return jsonify(ok=False, error=msg), 502
+    db.mark_reply_sent(business_id, review_id, text,
+                       datetime.now(timezone.utc))
+    return jsonify(ok=True)
+
+
+@app.get("/api/gbp/settings/<business_id>")
+@login_required
+def gbp_settings_get(business_id: str):
+    _require_owner_of(business_id)
+    s = db.get_gbp_settings(business_id)
+    s["auto_draft"] = bool(s.get("auto_draft"))
+    return jsonify(**s)
+
+
+@app.post("/api/gbp/settings/<business_id>")
+@login_required
+def gbp_settings_post(business_id: str):
+    _require_owner_of(business_id)
+    payload = request.get_json(silent=True) or {}
+    db.upsert_gbp_settings(business_id, payload)
+    return jsonify(ok=True)
+
+
 @app.get("/logout")
 def logout():
     session.clear()
@@ -374,9 +647,32 @@ def _match_google(name: str, city: str | None) -> list[dict]:
 
 
 def _serp_urls(query: str, limit: int = 8) -> list[dict]:
-    """Ricerca Google istantanea via DataForSEO SERP live: [{url,title}].
+    """Ricerca web istantanea: [{url,title}].
     È il motore che TROVA da solo le pagine delle aziende sulle piattaforme
-    (TripAdvisor, AutoScout24, Trustpilot…) senza chiedere nulla all'utente."""
+    (TripAdvisor, AutoScout24, Trustpilot…) senza chiedere nulla all'utente.
+
+    Primario: ricerca web gratuita (DuckDuckGo con fallback Bing) — zero
+    costi e zero credenziali, quindi il discovery funziona SEMPRE, anche
+    senza DATAFORSEO_AUTH. Ultima spiaggia: la vecchia SERP live DataForSEO
+    (a pagamento), solo se riattivata esplicitamente con EKKO_USE_DFS_SERP=1
+    e con le credenziali presenti."""
+    from ekko.connectors import websearch
+    try:
+        hits = websearch.search(query, num=limit)
+    except Exception:
+        hits = []
+    if hits:
+        return hits[:limit]
+    if os.environ.get("EKKO_USE_DFS_SERP") == "1" and \
+            os.environ.get("DATAFORSEO_AUTH"):
+        return _serp_urls_dfs(query, limit)
+    return []
+
+
+def _serp_urls_dfs(query: str, limit: int = 8) -> list[dict]:
+    """Ultima spiaggia: SERP Google via DataForSEO live (A PAGAMENTO).
+    Usata solo se la ricerca gratuita non trova nulla, EKKO_USE_DFS_SERP=1
+    e DATAFORSEO_AUTH è impostata (vedi _serp_urls)."""
     import httpx as _hx
     auth = os.environ.get("DATAFORSEO_AUTH")
     if not auth:

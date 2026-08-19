@@ -10,10 +10,26 @@ import abc
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterator
 
 from ekko.core.models import BusinessRef, FeedbackObject
+
+# Data minima delle recensioni GOOGLE gestite dalla piattaforma (richiesta
+# prodotto: si parte dal 2025). Vale per tutte le vie di acquisizione Google
+# (GBP corsia A e DataForSEO corsia B). Configurabile via env, formato ISO.
+GOOGLE_REVIEWS_SINCE_DEFAULT = "2025-01-01"
+
+
+def google_reviews_since() -> datetime:
+    """Cut-off (tz-aware UTC) sotto il quale le recensioni Google si scartano."""
+    raw = os.environ.get("EKKO_GOOGLE_REVIEWS_SINCE",
+                         GOOGLE_REVIEWS_SINCE_DEFAULT)
+    try:
+        d = datetime.fromisoformat(raw)
+    except ValueError:
+        d = datetime.fromisoformat(GOOGLE_REVIEWS_SINCE_DEFAULT)
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
 @dataclass

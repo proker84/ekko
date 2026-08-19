@@ -228,6 +228,54 @@
   #tt .v { font-weight:650; font-size:.88rem; }
   #tt .l { color:var(--ink-2); }
   .clickable { cursor:pointer; }
+  /* ---------- risposte google (fase 2) ---------- */
+  #gbpCard { margin-top:16px; }
+  .gbp-head { cursor:pointer; user-select:none; margin-bottom:0; align-items:center; }
+  #gbpCard[data-open="1"] .gbp-head { margin-bottom:10px; }
+  .gbp-caret { color:var(--ink-3); font-size:.85rem; transition:transform .15s; display:inline-block; }
+  #gbpCard[data-open="1"] .gbp-caret { transform:rotate(90deg); }
+  .gbp-spin { width:13px; height:13px; border:2px solid var(--grid);
+    border-top-color:var(--s1); border-radius:50%; display:inline-block;
+    animation:spin .8s linear infinite; vertical-align:-2px; }
+  .gbp-msg { border-radius:10px; padding:8px 14px; font-size:.8rem; margin-bottom:10px;
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .gbp-msg.ok { background:color-mix(in srgb,var(--good) 14%,transparent); color:var(--up); }
+  .gbp-msg.err { background:color-mix(in srgb,var(--critical) 12%,transparent); color:var(--critical); }
+  .gbp-bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+    padding:10px 14px; border:1px solid var(--border); border-radius:10px; margin-bottom:12px; }
+  .gbp-bar .loc { font-weight:600; display:inline-flex; align-items:center; gap:8px; }
+  .gbp-bar .spacer { flex:1; }
+  .btn-sec { background:none; border:1px solid var(--border); color:var(--s1);
+    border-radius:8px; padding:7px 12px; cursor:pointer; font-size:.8rem; }
+  .btn-sec:hover { background:var(--accent-wash); }
+  .btn-sec:disabled { opacity:.55; cursor:default; }
+  .gbp-loc-row { border:1px solid var(--border); border-radius:10px; padding:10px 14px;
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    margin-bottom:8px; flex-wrap:wrap; }
+  .gbp-draft label { font-size:.7rem; color:var(--ink-3); display:block; margin:8px 0 3px; }
+  .gbp-draft textarea { width:100%; min-height:88px; background:var(--page);
+    color:var(--ink-1); border:1px solid var(--border); border-radius:8px;
+    padding:8px 10px; font:inherit; font-size:.83rem; line-height:1.45; resize:vertical; }
+  .gbp-actions { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center; }
+  .gbp-actions .btn-start { padding:7px 14px; font-size:.8rem; }
+  .gbp-fb { font-size:.76rem; }
+  .gbp-ok { color:var(--up); }
+  .gbp-err { color:var(--critical); }
+  .badge.sent-ok { background:color-mix(in srgb,var(--good) 18%,transparent); color:var(--up); }
+  .gbp-reply-box { background:var(--accent-wash); border-radius:8px; padding:8px 10px;
+    margin-top:8px; font-size:.8rem; color:var(--ink-2); }
+  .gbp-set { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+  .gbp-set .frm { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px; }
+  @media (max-width:700px){ .gbp-set .frm { grid-template-columns:1fr; } }
+  .gbp-set .full { grid-column:1 / -1; }
+  .gbp-set label { font-size:.72rem; color:var(--ink-3); display:block; margin-bottom:3px; }
+  .gbp-set select, .gbp-set input, .gbp-set textarea { width:100%;
+    background:var(--surface-1); color:var(--ink-1); border:1px solid var(--border);
+    border-radius:8px; padding:7px 10px; font:inherit; font-size:.82rem; }
+  .gbp-set textarea { min-height:70px; resize:vertical; line-height:1.45; }
+  .gbp-hint { font-size:.7rem; color:var(--ink-3); margin-top:3px; }
+  .gbp-only { display:inline-flex; gap:6px; align-items:center; cursor:pointer;
+    font-size:.78rem; color:var(--ink-2); }
 </style>
 </head>
 <body class="viz-root">
@@ -390,6 +438,88 @@
   </div>
   <div id="revList"></div>
   <button class="more hidden" id="moreBtn" type="button">Mostra altre</button>
+</div>
+
+<!-- ============ Risposte Google (Fase 2) ============ -->
+<div class="card" id="gbpCard">
+  <div class="chead gbp-head" id="gbpToggle" role="button" tabindex="0"
+       aria-expanded="false" aria-controls="gbpBody">
+    <h2>Risposte Google
+      <span class="sub">leggi e rispondi alle recensioni del profilo Google Business</span></h2>
+    <span class="gbp-caret" aria-hidden="true">▶</span>
+  </div>
+  <div id="gbpBody" class="hidden">
+    <div id="gbpMsg" class="gbp-msg hidden"></div>
+    <div id="gbpLoading" class="empty hidden">
+      <span class="gbp-spin"></span> Verifica del collegamento in corso…</div>
+
+    <!-- 1. non connesso -->
+    <div id="gbpNotConnected" class="hidden">
+      <p style="color:var(--ink-2);margin-bottom:12px;line-height:1.5">
+        Collega il profilo Google Business dell'attività per leggere e rispondere
+        alle recensioni gratuitamente, direttamente da questa dashboard.
+        Le risposte vengono sempre preparate come bozza e inviate solo dopo la tua approvazione.</p>
+      <a id="gbpConnectBtn" class="btn-start" style="text-decoration:none"
+         href="#">🔗 Collega account Google</a>
+    </div>
+
+    <!-- 2. connesso ma sede non collegata -->
+    <div id="gbpPick" class="hidden">
+      <p style="color:var(--ink-2);margin-bottom:12px">
+        Account Google collegato ✓ — ora scegli la sede da associare a questa dashboard:</p>
+      <div id="gbpLocList"></div>
+    </div>
+
+    <!-- 3. collegato: barra sede + azioni -->
+    <div id="gbpLinked" class="hidden">
+      <div class="gbp-bar">
+        <span class="loc">📍 <span id="gbpLocName"></span></span>
+        <span class="spacer"></span>
+        <label class="gbp-only"><input type="checkbox" id="gbpOnlyChk" checked>
+          Solo senza risposta</label>
+        <button class="btn-sec" id="gbpSetBtn" type="button"
+                aria-expanded="false" aria-controls="gbpSettings">⚙ Impostazioni risposte</button>
+        <button class="btn-start" id="gbpSyncBtn" type="button">⟳ Sincronizza recensioni</button>
+      </div>
+
+      <!-- 5. impostazioni (collassabile) -->
+      <div class="gbp-set hidden" id="gbpSettings">
+        <b style="font-size:.85rem">Impostazioni delle risposte</b>
+        <div class="frm">
+          <div><label for="gbpTone">Tono</label>
+            <select id="gbpTone">
+              <option value="professionale">Professionale</option>
+              <option value="amichevole">Amichevole</option>
+              <option value="formale">Formale</option>
+            </select></div>
+          <div><label for="gbpLang">Lingua</label>
+            <select id="gbpLang">
+              <option value="it">Italiano</option>
+              <option value="en">Inglese</option>
+            </select></div>
+          <div class="full"><label for="gbpSign">Firma</label>
+            <input type="text" id="gbpSign" placeholder="es. Lo staff di {{ business_name }}"></div>
+          <div class="full"><label for="gbpTpl">Template personalizzato (opzionale)</label>
+            <textarea id="gbpTpl"
+              placeholder="es. Ciao {autore}, grazie per la recensione! … {firma}"></textarea>
+            <div class="gbp-hint">Placeholder disponibili: <code>{nome}</code> nome attività ·
+              <code>{autore}</code> autore della recensione · <code>{firma}</code> firma.
+              Se vuoto, la bozza viene generata dall'AI con tono e lingua scelti.</div></div>
+          <div class="full"><label class="gbp-only" style="font-size:.78rem">
+            <input type="checkbox" id="gbpAutoDraft">
+            Prepara bozze automaticamente per le nuove recensioni (l'invio resta sempre manuale)</label></div>
+        </div>
+        <div class="gbp-actions">
+          <button class="btn-start" id="gbpSetSave" type="button">Salva impostazioni</button>
+          <span class="gbp-fb" id="gbpSetFb"></span>
+        </div>
+      </div>
+
+      <!-- 4. lista recensioni -->
+      <div class="sub" id="gbpRevCount" style="margin-bottom:8px"></div>
+      <div id="gbpRevList"></div>
+    </div>
+  </div>
 </div>
 
 <div id="tt"></div>
@@ -1287,6 +1417,358 @@ renderAll();
   }
   setInterval(check, INTERVAL);
   if (PENDING) setTimeout(check, 8000);
+})();
+
+/* ---------------- Risposte Google (Fase 2) ----------------
+   Sezione lazy: /api/gbp/status viene chiamata solo alla prima apertura.
+   Flusso: connetti account → scegli sede → sincronizza → bozza AI →
+   modifica → approva e invia (mai invio automatico). */
+(function gbpSection(){
+  const card = document.getElementById("gbpCard");
+  const BID = DATA.business_id;
+  if (!BID){ card.classList.add("hidden"); return; }
+  const $ = id => document.getElementById(id);
+  /* escaping HTML dei contenuti recensione (anti-XSS) */
+  const gbpEsc = s => String(s==null?"":s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  const gbpDate = iso => {
+    if(!iso) return "";
+    const d = new Date(iso);
+    return isNaN(d) ? String(iso)
+      : d.toLocaleDateString("it-IT",{day:"numeric",month:"long",year:"numeric"});
+  };
+
+  let gbpStatus = null;        // ultimo /status
+  let gbpReviews = [];         // cache recensioni renderizzate
+  let gbpOnly = true;          // filtro "solo senza risposta" (default attivo)
+  let gbpLoadedOnce = false;   // status già richiesto (lazy)
+  let gbpSettingsLoaded = false;
+
+  $("gbpConnectBtn").href = "/gbp/connect?business_id=" + encodeURIComponent(BID);
+
+  /* messaggi non bloccanti in testa alla sezione (mai alert) */
+  function gbpMsg(txt, ok, retryFn){
+    const el = $("gbpMsg");
+    el.replaceChildren();
+    if(!txt){ el.className = "gbp-msg hidden"; return; }
+    el.className = "gbp-msg " + (ok ? "ok" : "err");
+    el.appendChild(document.createTextNode(txt));
+    if(retryFn){
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn-sec"; b.textContent = "Riprova";
+      b.addEventListener("click", ()=>{ gbpMsg(""); retryFn(); });
+      el.appendChild(b);
+    }
+  }
+
+  /* fetch con gestione centralizzata di 409 (non connesso) */
+  async function gbpApi(path, opts){
+    const r = await fetch(path, opts);
+    if (r.status === 409){
+      gbpStatus = {connected:false, linked:{location:null,title:null}, locations:[]};
+      gbpRenderStatus();
+      gbpMsg("Il collegamento con Google è scaduto o è stato revocato: ricollega l'account.", false);
+      const e = new Error("gbp_not_connected"); e.silent = true; throw e;
+    }
+    let j = null;
+    try { j = await r.json(); } catch(_){}
+    if (!r.ok){
+      const e = new Error((j && j.error) || ("HTTP " + r.status));
+      e.status = r.status; e.payload = j; throw e;
+    }
+    return j;
+  }
+
+  /* ---------- stati della sezione ---------- */
+  function gbpRenderStatus(){
+    ["gbpLoading","gbpNotConnected","gbpPick","gbpLinked"]
+      .forEach(id => $(id).classList.add("hidden"));
+    if (!gbpStatus) return;
+    if (!gbpStatus.connected){ $("gbpNotConnected").classList.remove("hidden"); return; }
+    const lk = gbpStatus.linked || {};
+    if (!lk.location){ $("gbpPick").classList.remove("hidden"); gbpRenderLocations(); return; }
+    $("gbpLinked").classList.remove("hidden");
+    $("gbpLocName").textContent = lk.title || lk.location;
+  }
+
+  async function gbpLoadStatus(){
+    ["gbpNotConnected","gbpPick","gbpLinked"].forEach(id => $(id).classList.add("hidden"));
+    $("gbpLoading").classList.remove("hidden");
+    try{
+      gbpStatus = await gbpApi(`/api/gbp/status/${encodeURIComponent(BID)}`);
+      gbpRenderStatus();
+      if (gbpStatus.connected && gbpStatus.linked && gbpStatus.linked.location)
+        await gbpLoadReviews();
+    }catch(e){
+      $("gbpLoading").classList.add("hidden");
+      if (!e.silent)
+        gbpMsg("Impossibile verificare lo stato del collegamento Google.", false, gbpLoadStatus);
+    }
+  }
+
+  /* ---------- scelta sede ---------- */
+  function gbpRenderLocations(){
+    const wrap = $("gbpLocList"); wrap.replaceChildren();
+    const locs = gbpStatus.locations || [];
+    if (!locs.length){
+      wrap.innerHTML = '<div class="empty">Nessuna sede trovata su questo account Google.<br>' +
+        'Verifica di aver effettuato l\'accesso con l\'account che gestisce il profilo Business.</div>';
+      return;
+    }
+    locs.forEach(l => {
+      const row = document.createElement("div"); row.className = "gbp-loc-row";
+      const info = document.createElement("div");
+      const t = document.createElement("div"); t.style.fontWeight = "600";
+      t.textContent = l.title || l.name || "(sede senza nome)";
+      const a = document.createElement("div"); a.className = "sub";
+      a.textContent = l.address || "";
+      info.append(t, a);
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "btn-start"; btn.textContent = "Collega";
+      btn.addEventListener("click", async ()=>{
+        btn.disabled = true; btn.textContent = "Collego…";
+        try{
+          await gbpApi(`/api/gbp/link/${encodeURIComponent(BID)}`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({account:l.account, location:l.name, title:l.title || ""})});
+          gbpMsg("Sede collegata ✓", true);
+          await gbpLoadStatus();
+        }catch(e){
+          btn.disabled = false; btn.textContent = "Collega";
+          if (!e.silent) gbpMsg("Collegamento della sede non riuscito. Riprova.", false);
+        }
+      });
+      row.append(info, btn); wrap.appendChild(row);
+    });
+  }
+
+  /* ---------- recensioni ---------- */
+  async function gbpLoadReviews(){
+    const list = $("gbpRevList");
+    list.innerHTML = '<div class="empty"><span class="gbp-spin"></span> Carico le recensioni…</div>';
+    $("gbpRevCount").textContent = "";
+    try{
+      const q = gbpOnly ? "?only=unanswered" : "";
+      const j = await gbpApi(`/api/gbp/reviews/${encodeURIComponent(BID)}${q}`);
+      gbpReviews = j.reviews || [];
+      gbpRenderReviews();
+    }catch(e){
+      if (e.silent) return;
+      list.replaceChildren();
+      const d = document.createElement("div"); d.className = "empty";
+      d.appendChild(document.createTextNode("Impossibile caricare le recensioni. "));
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn-sec"; b.textContent = "Riprova";
+      b.addEventListener("click", gbpLoadReviews);
+      d.appendChild(b); list.appendChild(d);
+    }
+  }
+
+  function gbpRenderReviews(){
+    const list = $("gbpRevList");
+    const rows = gbpReviews;
+    $("gbpRevCount").textContent = rows.length
+      ? `${rows.length} ${rows.length===1?"recensione":"recensioni"}${gbpOnly?" senza risposta":""}`
+      : "";
+    if (!rows.length){
+      list.innerHTML = '<div class="empty">' + (gbpOnly
+        ? "Nessuna recensione senza risposta: tutto gestito ✓<br>Sincronizza per cercarne di nuove, o disattiva il filtro per vederle tutte."
+        : "Nessuna recensione importata. Premi “Sincronizza recensioni”.") + '</div>';
+      return;
+    }
+    list.innerHTML = rows.map((r, i) => {
+      const st = Math.max(0, Math.min(5, Math.round(+r.rating || 0)));
+      const cls = st >= 4 ? "pos" : (st >= 1 && st <= 2 ? "neg" : "neu");
+      const draftSent = r.draft && r.draft.status === "sent";
+      const answered = r.has_reply || draftSent;
+      let body = "";
+      if (answered){
+        const replyTxt = (draftSent && r.draft.text) || r.reply_text || "";
+        body = '<div class="gbp-actions"><span class="badge sent-ok">✓ ' +
+          (draftSent && !r.has_reply ? "Inviata" : "Risposta inviata") + '</span></div>' +
+          (replyTxt ? `<div class="gbp-reply-box"><b>La tua risposta:</b> ${gbpEsc(replyTxt)}</div>` : "");
+      } else if (r.draft){
+        body = `<div class="gbp-draft">
+          <label for="gbpTa${i}">Bozza di risposta — modificala liberamente prima dell'invio</label>
+          <textarea id="gbpTa${i}" data-ta="${i}">${gbpEsc(r.draft.text || "")}</textarea>
+          <div class="gbp-actions">
+            <button type="button" class="btn-sec" data-save="${i}">Salva bozza</button>
+            <button type="button" class="btn-start" data-send="${i}">Approva e invia</button>
+            <button type="button" class="btn-sec" data-gen="${i}">↻ Rigenera</button>
+            <span class="gbp-fb" data-fb="${i}"></span>
+          </div></div>`;
+      } else {
+        body = `<div class="gbp-actions">
+          <button type="button" class="btn-sec" data-gen="${i}">✨ Genera bozza AI</button>
+          <span class="gbp-fb" data-fb="${i}"></span></div>`;
+      }
+      return `<div class="rev ${cls}">
+        <span class="stars">${"★".repeat(st)}${"☆".repeat(5-st)}</span>
+        <b style="margin-left:8px">${gbpEsc(r.author || "Anonimo")}</b>
+        <span class="sub" style="margin-left:6px">${gbpEsc(gbpDate(r.published_at))}</span>
+        <div style="margin-top:6px">${r.text ? gbpEsc(r.text)
+          : '<span class="sub">(solo valutazione, senza testo)</span>'}</div>
+        ${body}</div>`;
+    }).join("");
+    list.querySelectorAll("[data-gen]").forEach(b =>
+      b.addEventListener("click", ()=>gbpGenDraft(+b.dataset.gen, b)));
+    list.querySelectorAll("[data-save]").forEach(b =>
+      b.addEventListener("click", ()=>gbpSaveDraft(+b.dataset.save, b)));
+    list.querySelectorAll("[data-send]").forEach(b =>
+      b.addEventListener("click", ()=>gbpSend(+b.dataset.send, b)));
+  }
+
+  function gbpFb(i, msg, ok){
+    const el = $("gbpRevList").querySelector(`[data-fb="${i}"]`);
+    if (el){ el.className = "gbp-fb " + (ok ? "gbp-ok" : "gbp-err"); el.textContent = msg; }
+  }
+
+  async function gbpGenDraft(i, btn){
+    const r = gbpReviews[i]; if (!r) return;
+    btn.disabled = true; const old = btn.textContent;
+    btn.textContent = "Generazione in corso…";
+    try{
+      const j = await gbpApi(
+        `/api/gbp/draft/${encodeURIComponent(BID)}/${encodeURIComponent(r.review_id)}`,
+        {method:"POST"});
+      r.draft = (j && j.draft) || {text:"", status:"draft"};
+      gbpRenderReviews();
+    }catch(e){
+      btn.disabled = false; btn.textContent = old;
+      if (!e.silent) gbpFb(i, "Generazione non riuscita, riprova.", false);
+    }
+  }
+
+  async function gbpSaveDraft(i, btn){
+    const r = gbpReviews[i]; if (!r) return;
+    const ta = $("gbpRevList").querySelector(`[data-ta="${i}"]`);
+    const text = ta ? ta.value : "";
+    btn.disabled = true;
+    try{
+      await gbpApi(
+        `/api/gbp/draft/${encodeURIComponent(BID)}/${encodeURIComponent(r.review_id)}/save`,
+        {method:"POST", headers:{"Content-Type":"application/json"},
+         body: JSON.stringify({text})});
+      if (r.draft) r.draft.text = text; else r.draft = {text, status:"draft"};
+      gbpFb(i, "Bozza salvata ✓", true);
+    }catch(e){
+      if (!e.silent) gbpFb(i, "Salvataggio non riuscito, riprova.", false);
+    }
+    btn.disabled = false;
+  }
+
+  async function gbpSend(i, btn){
+    const r = gbpReviews[i]; if (!r) return;
+    const ta = $("gbpRevList").querySelector(`[data-ta="${i}"]`);
+    const text = (ta ? ta.value : (r.draft && r.draft.text) || "").trim();
+    if (!text){ gbpFb(i, "La risposta è vuota: scrivi o genera una bozza.", false); return; }
+    if (!confirm(`Pubblicare questa risposta su Google alla recensione di ${r.author || "questo utente"}?\n\nL'operazione è visibile pubblicamente.`))
+      return;
+    btn.disabled = true; btn.textContent = "Invio in corso…";
+    try{
+      const j = await gbpApi(
+        `/api/gbp/reply/${encodeURIComponent(BID)}/${encodeURIComponent(r.review_id)}`,
+        {method:"POST", headers:{"Content-Type":"application/json"},
+         body: JSON.stringify({text})});
+      if (j && j.ok === false) throw new Error(j.error || "reply_failed");
+      r.has_reply = true; r.reply_text = text; r.draft = {text, status:"sent"};
+      gbpRenderReviews();   // badge verde "Risposta inviata"
+    }catch(e){
+      if (e.silent) return;
+      btn.disabled = false; btn.textContent = "Approva e invia";
+      gbpFb(i, "Invio non riuscito (Google non ha accettato la richiesta). La bozza è ancora qui: riprova tra qualche minuto.", false);
+    }
+  }
+
+  /* ---------- sincronizzazione ---------- */
+  async function gbpSync(){
+    const btn = $("gbpSyncBtn");
+    btn.disabled = true; btn.replaceChildren();
+    const sp = document.createElement("span"); sp.className = "spin";
+    btn.append(sp, document.createTextNode(" Sincronizzo…"));
+    gbpMsg("");
+    try{
+      const j = await gbpApi(`/api/gbp/sync/${encodeURIComponent(BID)}`, {method:"POST"});
+      const n = j.stored || 0;
+      let msg = n === 1 ? "1 nuova recensione importata" : `${n} nuove recensioni importate`;
+      if (j.duplicates) msg += ` (${j.duplicates} già presenti)`;
+      gbpMsg(msg, true);
+      await gbpLoadReviews();
+    }catch(e){
+      if (!e.silent) gbpMsg("Sincronizzazione non riuscita. Riprova tra poco.", false);
+    }
+    btn.disabled = false; btn.textContent = "⟳ Sincronizza recensioni";
+  }
+
+  /* ---------- impostazioni risposte ---------- */
+  async function gbpToggleSettings(){
+    const p = $("gbpSettings");
+    const show = p.classList.contains("hidden");
+    p.classList.toggle("hidden", !show);
+    $("gbpSetBtn").setAttribute("aria-expanded", String(show));
+    if (show && !gbpSettingsLoaded){
+      try{
+        const j = await gbpApi(`/api/gbp/settings/${encodeURIComponent(BID)}`);
+        if (j){
+          if (j.tone) $("gbpTone").value = j.tone;
+          if (j.language) $("gbpLang").value = j.language;
+          $("gbpSign").value = j.signature || "";
+          $("gbpTpl").value = j.template || "";
+          $("gbpAutoDraft").checked = !!j.auto_draft;
+        }
+        gbpSettingsLoaded = true;
+      }catch(e){
+        if (!e.silent){
+          const fb = $("gbpSetFb");
+          fb.className = "gbp-fb gbp-err";
+          fb.textContent = "Impossibile caricare le impostazioni salvate.";
+        }
+      }
+    }
+  }
+
+  async function gbpSaveSettings(){
+    const fb = $("gbpSetFb"); fb.textContent = "";
+    const btn = $("gbpSetSave"); btn.disabled = true;
+    try{
+      await gbpApi(`/api/gbp/settings/${encodeURIComponent(BID)}`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          tone: $("gbpTone").value, language: $("gbpLang").value,
+          signature: $("gbpSign").value, template: $("gbpTpl").value,
+          auto_draft: $("gbpAutoDraft").checked })});
+      fb.className = "gbp-fb gbp-ok"; fb.textContent = "Impostazioni salvate ✓";
+      setTimeout(()=>{ fb.textContent = ""; }, 3000);
+    }catch(e){
+      if (!e.silent){ fb.className = "gbp-fb gbp-err";
+        fb.textContent = "Salvataggio non riuscito, riprova."; }
+    }
+    btn.disabled = false;
+  }
+
+  /* ---------- apertura/chiusura sezione (caricamento lazy) ---------- */
+  function gbpToggleOpen(forceOpen){
+    const isOpen = card.dataset.open === "1";
+    const next = forceOpen === true ? true : !isOpen;
+    card.dataset.open = next ? "1" : "";
+    $("gbpBody").classList.toggle("hidden", !next);
+    $("gbpToggle").setAttribute("aria-expanded", String(next));
+    if (next && !gbpLoadedOnce){ gbpLoadedOnce = true; gbpLoadStatus(); }
+  }
+  $("gbpToggle").addEventListener("click", ()=>gbpToggleOpen());
+  $("gbpToggle").addEventListener("keydown", e=>{
+    if (e.key === "Enter" || e.key === " "){ e.preventDefault(); gbpToggleOpen(); } });
+  $("gbpOnlyChk").addEventListener("change", e=>{ gbpOnly = e.target.checked; gbpLoadReviews(); });
+  $("gbpSyncBtn").addEventListener("click", gbpSync);
+  $("gbpSetBtn").addEventListener("click", gbpToggleSettings);
+  $("gbpSetSave").addEventListener("click", gbpSaveSettings);
+
+  /* ritorno dall'OAuth Google: ?gbp=connected → apri subito la sezione */
+  if (new URLSearchParams(location.search).get("gbp") === "connected"){
+    gbpToggleOpen(true);
+    setTimeout(()=>card.scrollIntoView({behavior:"smooth", block:"start"}), 150);
+  }
 })();
 </script>
 </body>
