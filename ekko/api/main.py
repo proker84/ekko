@@ -96,6 +96,20 @@ def login_required(fn):
     return _wrap
 
 
+def login_required_api(fn):
+    """Variante per endpoint chiamati via fetch/form dal frontend (/match, /search):
+    senza login risponde 401 JSON invece del redirect HTML, così il client
+    può intercettare l'errore e mandare l'utente alla pagina di login."""
+    @functools.wraps(fn)
+    def _wrap(*a, **k):
+        owner, ok = current_owner()
+        if not ok:
+            return jsonify(error="login_required",
+                           login_url=url_for("login")), 401
+        return fn(*a, **k)
+    return _wrap
+
+
 def _require_owner_of(business_id: str) -> str:
     """Verifica che l'azienda appartenga all'agenzia loggata; altrimenti 403/redirect."""
     owner, ok = current_owner()
@@ -527,15 +541,17 @@ def health():
 
 
 @app.get("/")
-@login_required
 def home():
+    # Home PUBBLICA: anche senza login si vede il motore di ricerca; le azioni
+    # che avviano lavoro (/match, /search) restano protette e rispondono 401.
     from ekko.connectors import (autoscout24, certified, dataforseo,
                                  facebook, facebook_public, tripadvisor_dfs)
     gw = AIGateway()
-    owner, _ = current_owner()
+    owner, logged = current_owner()   # owner=None se non loggato (OAuth attivo)
     tpl = _templates.get_template("search.html")
     return tpl.render(
-        recent=db.list_businesses(owner_id=owner),
+        # senza owner niente "recenti": nessun dato altrui esposto agli anonimi
+        recent=db.list_businesses(owner_id=owner) if owner else [],
         google_on=bool(os.environ.get("GOOGLE_MAPS_API_KEY")) or dataforseo.enabled(),
         tp_on=bool(os.environ.get("TRUSTPILOT_API_KEY")),
         tp_public_on=trustpilot_public.enabled(),
@@ -551,7 +567,11 @@ def home():
         ai_label=f" · {gw.provider}" if gw.available() else "",
         auth_on=google_oauth.enabled(),
         user_name=session.get("name"),
-        user_email=session.get("email"),
+        # --- contratto con il frontend (home pubblica + login in pagina) ---
+        logged=logged,                                        # bool
+        user_email=session.get("email") or session.get("name"),  # str | None
+        login_url=url_for("login"),                           # flusso di login esistente
+        logout_url=url_for("logout"),                         # route /logout esistente
     )
 
 
@@ -841,7 +861,7 @@ def _match_certified(name: str, domain: str | None, which: str) -> list[dict]:
 
 
 @app.post("/match")
-@login_required
+@login_required_api          # chiamata via fetch: 401 JSON, non redirect HTML
 def match():
     """Identificazione azienda: candidati e confidenza per ogni fonte attiva."""
     from ekko.connectors import (autoscout24 as _as24, certified as _cert,
@@ -913,7 +933,7 @@ def match():
 
 
 @app.post("/search")
-@login_required
+@login_required_api          # chiamata via fetch/form: 401 JSON, non redirect HTML
 def search():
     owner, _ = current_owner()
     name = (request.form.get("name") or "").strip()
@@ -933,6 +953,8 @@ def search():
         tripadvisor_url_path=(request.form.get("tripadvisor_url_path") or "").strip() or None,
         facebook_url=(request.form.get("facebook_url") or "").strip() or None,
         skipped_sources=sorted(skips),
+        # "È la mia azienda": sblocca il collegamento Google Business Profile
+        is_own=(request.form.get("is_own") or "").strip() == "1",
     )
     try:
         _d = int(request.form.get("depth") or 0)
@@ -1214,12 +1236,13 @@ def get_dashboard(business_id: str):
     return render_dashboard(payload.get("name") or business_id, breakdown, feedback,
                             business_id=business_id,
                             total_reviews=payload.get("total_reviews_google"),
-                            pending=pending)
+                            pending=pending,
+                            is_own=bool(payload.get("is_own")))
 
 
 def render_dashboard(business_name: str, breakdown, feedback,
                      business_id: str | None = None, total_reviews=None,
-                     pending: bool = False) -> str:
+                     pending: bool = False, is_own: bool = False) -> str:
     """Dashboard interattiva self-contained: dati embedded, zero dipendenze esterne."""
     import json
     from datetime import datetime, timezone
@@ -1230,6 +1253,9 @@ def render_dashboard(business_name: str, breakdown, feedback,
         "business_id": business_id or _slugify(business_name),
         "business_name": business_name,
         "total_reviews": total_reviews,
+        # attività di proprietà dell'utente: il frontend apre in automatico
+        # la sezione "Risposte Google" quando DATA.is_own è true
+        "is_own": is_own,
         "feedback": [
             {
                 "d": f.published_at.isoformat(),

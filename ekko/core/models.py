@@ -83,6 +83,9 @@ class BusinessRef(BaseModel):
     total_reviews_facebook: Optional[int] = None
     # Fonti escluse dall'utente nello step di identificazione
     skipped_sources: list[str] = Field(default_factory=list)
+    # Attività di proprietà dell'utente → sblocca il collegamento
+    # Google Business Profile per recensioni complete e risposte.
+    is_own: bool = False
 
 
 class Urgency(str, Enum):

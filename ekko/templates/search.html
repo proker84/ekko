@@ -134,18 +134,57 @@
     light-dark(rgba(11,11,11,.12),rgba(255,255,255,.14)); border-radius:8px;
     padding:5px 10px; }
   .userbar a:hover { border-color:#2a78d6; }
+  .userbar a.login-btn { background:#2a78d6; color:#fff; border-color:#2a78d6;
+    font-weight:600; padding:7px 14px; }
+  .userbar a.login-btn:hover { background:#1e5cb0; border-color:#1e5cb0; }
+  /* ---------- invito al login (sostituisce "ricerche recenti" da sloggati) ---------- */
+  .login-invite { display:block; padding:12px 14px;
+    background:light-dark(#fcfcfb,#1a1a19); border:1px solid
+    light-dark(rgba(11,11,11,.08),rgba(255,255,255,.10)); border-radius:10px;
+    color:inherit; text-decoration:none; font-size:.88rem; line-height:1.5; }
+  .login-invite:hover { border-color:#2a78d6; }
+  .login-invite b { color:#2a78d6; }
+  /* ---------- blocco "La mia azienda" ---------- */
+  .own-biz { margin-top:22px; max-width:620px; width:100%;
+    background:light-dark(#fcfcfb,#1a1a19); border:1px solid #2a78d655;
+    border-left:4px solid #2a78d6; border-radius:12px; padding:14px 16px;
+    display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+    box-shadow:0 4px 24px rgba(0,0,0,.05); }
+  .own-biz .ob-txt { flex:1; min-width:240px; font-size:.85rem; line-height:1.5;
+    color:light-dark(#52514e,#c3c2b7); }
+  .own-biz .ob-txt b { color:light-dark(#0b0b0b,#fff); }
+  .own-biz .ob-go { background:#2a78d6; color:#fff; border:none; border-radius:10px;
+    padding:10px 16px; font-size:.85rem; font-weight:600; cursor:pointer;
+    text-decoration:none; white-space:nowrap; }
+  .own-biz .ob-go:hover { background:#1e5cb0; }
+  /* ---------- checkbox "è la mia azienda" nello step di conferma ---------- */
+  .own-row { display:flex; gap:10px; align-items:flex-start; text-align:left;
+    border:1px solid rgba(130,155,255,.22); border-radius:12px;
+    padding:12px 14px; margin-top:16px; cursor:pointer;
+    background:rgba(77,130,243,.08); }
+  .own-row:hover { border-color:#4d82f3; }
+  .own-row input { margin-top:2px; accent-color:#4d82f3; }
+  .own-row .ol { font-size:.88rem; font-weight:600; }
+  .own-row .oh { display:block; font-size:.74rem; font-weight:400; color:#8290c5;
+    margin-top:3px; line-height:1.45; }
 </style>
 </head>
 <body>
+  {# nuove variabili (home pubblica) con default difensivi: i render legacy
+     senza `logged`/`login_url`/`logout_url` mantengono il comportamento di prima #}
+  {% set is_logged = logged|default((auth_on|default(false)) and (user_email|default(none))) %}
+  {% set _login_url = login_url|default('/login') %}
+  {% set _logout_url = logout_url|default('/logout') %}
   <div class="userbar">
-    {% if auth_on and user_email %}
-    <span class="who">🏢 {{ user_name or user_email }}</span>
+    {% if is_logged %}
+    <span class="who">🏢 {{ user_name|default(none) or user_email|default(none) or 'Account collegato' }}</span>
     {% endif %}
-    {% if fb_connectable %}
+    {% if fb_connectable|default(false) %}
     <a href="/auth/facebook" title="Collega le pagine Facebook dei tuoi clienti">
-      {% if fb_pages %}📘 {{ fb_pages }} pagine FB{% else %}📘 Collega Facebook{% endif %}</a>
+      {% if fb_pages|default(0) %}📘 {{ fb_pages }} pagine FB{% else %}📘 Collega Facebook{% endif %}</a>
     {% endif %}
-    {% if auth_on and user_email %}<a href="/logout">Esci</a>{% endif %}
+    {% if is_logged %}<a href="{{ _logout_url }}">Esci</a>
+    {% else %}<a class="login-btn" href="{{ _login_url }}">Accedi con Google</a>{% endif %}
   </div>
   <div class="logo">ekko<span>.</span></div>
   <div class="tag">Che reputazione ha questa azienda? Scrivilo. Ekko fa il resto.</div>
@@ -184,6 +223,13 @@
         Massimo ~4490 per fonte; se ce ne sono meno, arrivano tutte quelle disponibili.</div>
     </div>
   </form>
+
+  <!-- Blocco "La mia azienda": visibile sempre; da sloggati il click porta al login -->
+  <div class="own-biz" id="ownBiz">
+    <div class="ob-txt"><b>La mia azienda</b> — sei il proprietario? Collega il profilo
+      Google Business per vedere <b>tutte</b> le recensioni e rispondere dalla dashboard.</div>
+    <button type="button" class="ob-go" id="ownBizGo">🏢 Analizza la mia azienda</button>
+  </div>
   <!-- Overlay: risultati "oscurati" dietro, ricerca grande al centro, barre per fonte -->
   <div class="collect hidden" id="collect" role="status" aria-live="polite">
     <div class="mock" aria-hidden="true">
@@ -207,6 +253,13 @@
           <button type="button" id="mRefineGo">🔍 Ricerca</button>
         </div>
       </div>
+      <!-- "È la mia azienda": form="f" la associa al form che fa il POST /search -->
+      <label class="own-row" for="isOwnChk">
+        <input type="checkbox" id="isOwnChk" name="is_own" value="1" form="f">
+        <span class="ol">Questa è la mia azienda
+          <span class="oh">Sblocca il collegamento Google Business Profile:
+            tutte le recensioni e le risposte dalla dashboard.</span></span>
+      </label>
       <button class="go-big" id="mGo" type="button" disabled>▶ Avvia analisi</button>
     </div>
     <!-- Fase 2: raccolta con progress bar -->
@@ -237,7 +290,7 @@
     <br>Le fonti spente si attivano con le chiavi/flag in <code>.env</code>.
   </div>
 
-  {% if recent %}
+  {% if is_logged and recent %}
   <div class="recent">
     <h2>ANALISI RECENTI</h2>
     {% for b in recent %}
@@ -247,8 +300,29 @@
     {% endfor %}
   </div>
   {% endif %}
+  {% if not is_logged %}
+  <div class="recent">
+    <h2>LE TUE ANALISI</h2>
+    <a class="login-invite" href="{{ _login_url }}"><b>Accedi con Google</b>
+      per salvare le tue analisi e rivederle qui in qualsiasi momento. →</a>
+  </div>
+  {% endif %}
 
 <script>
+/* ---------- stato login (home pubblica) ---------- */
+const LOGGED = {{ 'true' if is_logged else 'false' }};
+const LOGIN_URL = {{ _login_url|tojson }};
+/* Le fetch verso /match e /search da sloggati ricevono 401 JSON
+   {"error":"login_required","login_url":"..."}: reindirizza al login,
+   preferendo l'URL indicato dal server. Niente crash, niente errori muti. */
+async function authRedirect(r){
+  if (r.status !== 401) return false;
+  let j = null;
+  try { j = await r.json(); } catch(_){}
+  location.href = (j && j.login_url) || LOGIN_URL;
+  return true;
+}
+
 /* ---------- raccolta con overlay: si va ai risultati solo a fonti complete ---------- */
 /* fonti attive (dal server) -> una barra ciascuna; le spente restano in lista grigie */
 const ALL_SOURCES = [
@@ -508,6 +582,7 @@ function startSearch(){
     try{
       const r=await fetch("/search",{ method:"POST", body:fd,
         headers:{ "X-Requested-With":"fetch" }});
+      if(await authRedirect(r)) return;      /* 401 -> pagina di login */
       if(!r.ok) throw new Error("http "+r.status);
       const j=await r.json();
       if(!j.ok || !j.id) throw new Error("bad payload");
@@ -540,6 +615,7 @@ async function runMatch(name){
   try{
     const r=await fetch("/match",{ method:"POST", body:fd,
       headers:{ "X-Requested-With":"fetch" }});
+    if(await authRedirect(r)) return false;   /* 401 -> pagina di login */
     if(!r.ok) throw new Error("http "+r.status);
     const j=await r.json();
     if(!j.ok) throw new Error("no match");
@@ -565,10 +641,21 @@ document.getElementById("mRefine").addEventListener("keydown",e=>{
 
 document.getElementById("f").addEventListener("submit", async (e)=>{
   e.preventDefault();
+  if(!LOGGED){ location.href=LOGIN_URL; return; }   /* analisi solo da loggati */
   const name=(document.getElementById("name").value||"").trim();
   if(!name) return;
   document.getElementById("go").disabled=true;
   runMatch(name);
+});
+
+/* ---------- blocco "La mia azienda": porta alla ricerca con is_own preattivato ---------- */
+document.getElementById("ownBizGo").addEventListener("click", ()=>{
+  if(!LOGGED){ location.href=LOGIN_URL; return; }   /* da sloggati: prima il login */
+  const chk=document.getElementById("isOwnChk");
+  if(chk) chk.checked=true;                /* flag pronto nello step di conferma */
+  const inp=document.getElementById("name");
+  inp.scrollIntoView({behavior:"smooth", block:"center"});
+  inp.focus({preventScroll:true});
 });
 
 function startSearchDirect(form,name){
@@ -577,6 +664,7 @@ function startSearchDirect(form,name){
     try{
       const r=await fetch("/search",{ method:"POST", body:new FormData(form),
         headers:{ "X-Requested-With":"fetch" }});
+      if(await authRedirect(r)) return;      /* 401 -> pagina di login */
       if(!r.ok) throw new Error("http "+r.status);
       const j=await r.json();
       if(!j.ok || !j.id) throw new Error("bad payload");

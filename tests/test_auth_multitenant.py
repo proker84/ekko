@@ -62,11 +62,10 @@ class MultiTenantTest(unittest.TestCase):
         importlib.reload(main)
         main.default_connectors = lambda owner_id=None: []
 
-        # home senza login -> redirect a /login
+        # home PUBBLICA anche senza login (il login avviene in pagina)
         anon = main.app.test_client()
         r = anon.get("/")
-        self.assertEqual(r.status_code, 302)
-        self.assertIn("/login", r.headers["Location"])
+        self.assertEqual(r.status_code, 200)
         # pagina di login servita
         lp = anon.get("/login")
         self.assertEqual(lp.status_code, 200)
@@ -113,11 +112,14 @@ class MultiTenantTest(unittest.TestCase):
         ok = ca.get(f"/businesses/{bidA}/dashboard")
         self.assertEqual(ok.status_code, 200)
 
-        # logout azzera la sessione -> redirect al login
+        # logout azzera la sessione -> redirect al login; la home resta
+        # pubblica ma le azioni protette rispondono 401 JSON
         lo = ca.get("/logout")
         self.assertIn("/login", lo.headers["Location"])
         after = ca.get("/")
-        self.assertIn("/login", after.headers["Location"])
+        self.assertEqual(after.status_code, 200)
+        blocked = ca.post("/search", data={"name": "Eataly"})
+        self.assertEqual(blocked.status_code, 401)
 
     # ---- unità: decodifica id_token e authorization_url ----
     def test_oauth_helpers(self):

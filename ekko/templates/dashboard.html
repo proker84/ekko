@@ -276,6 +276,12 @@
   .gbp-hint { font-size:.7rem; color:var(--ink-3); margin-top:3px; }
   .gbp-only { display:inline-flex; gap:6px; align-items:center; cursor:pointer;
     font-size:.78rem; color:var(--ink-2); }
+  /* proprietario dichiarato (is_own): nota + CTA evidenziato quando non connesso */
+  .gbp-own-note { background:var(--accent-wash); border:1px solid var(--border);
+    border-left:3px solid var(--s1); color:var(--ink-1); border-radius:10px;
+    padding:9px 14px; font-size:.82rem; line-height:1.5; margin-bottom:12px; }
+  #gbpConnectBtn.own-cta { box-shadow:0 0 0 2px var(--s1),
+    0 6px 18px color-mix(in srgb, var(--s1) 40%, transparent); }
 </style>
 </head>
 <body class="viz-root">
@@ -455,6 +461,8 @@
 
     <!-- 1. non connesso -->
     <div id="gbpNotConnected" class="hidden">
+      <div id="gbpOwnNote" class="gbp-own-note hidden">🏢 Hai indicato che questa è
+        la tua azienda: collega il profilo per vedere tutte le recensioni e rispondere.</div>
       <p style="color:var(--ink-2);margin-bottom:12px;line-height:1.5">
         Collega il profilo Google Business dell'attività per leggere e rispondere
         alle recensioni gratuitamente, direttamente da questa dashboard.
@@ -1485,7 +1493,14 @@ renderAll();
     ["gbpLoading","gbpNotConnected","gbpPick","gbpLinked"]
       .forEach(id => $(id).classList.add("hidden"));
     if (!gbpStatus) return;
-    if (!gbpStatus.connected){ $("gbpNotConnected").classList.remove("hidden"); return; }
+    if (!gbpStatus.connected){
+      $("gbpNotConnected").classList.remove("hidden");
+      if (DATA.is_own === true){          /* proprietario dichiarato: evidenzia il CTA */
+        $("gbpOwnNote").classList.remove("hidden");
+        $("gbpConnectBtn").classList.add("own-cta");
+      }
+      return;
+    }
     const lk = gbpStatus.linked || {};
     if (!lk.location){ $("gbpPick").classList.remove("hidden"); gbpRenderLocations(); return; }
     $("gbpLinked").classList.remove("hidden");
@@ -1768,6 +1783,11 @@ renderAll();
   if (new URLSearchParams(location.search).get("gbp") === "connected"){
     gbpToggleOpen(true);
     setTimeout(()=>card.scrollIntoView({behavior:"smooth", block:"start"}), 150);
+  } else if (DATA.is_own === true){
+    /* "È la mia azienda" dichiarato alla ricerca: apri la sezione GBP
+       al caricamento (senza scroll: la dashboard resta leggibile dall'alto).
+       Con is_own assente/false il comportamento è identico a prima. */
+    gbpToggleOpen(true);
   }
 })();
 </script>
